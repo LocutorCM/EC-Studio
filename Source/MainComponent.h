@@ -84,6 +84,7 @@ private:
     int selectedMidiNote{-1};
     int dragOriginalPitch{60};
     int dragStartX{0};
+    int dragStartY{0};
     int dragOriginalStart{0};
     std::atomic<int> tempo{120};
     std::atomic<double> engineRate{0.0};

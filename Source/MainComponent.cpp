@@ -890,6 +890,7 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
                 draggingMidiNote = true;
                 selectedMidiNote = ni;
                 dragStartX = e.x;
+                dragStartY = e.y;
                 dragOriginalStart = note.start;
                 dragOriginalPitch = note.pitch;
                 return;
