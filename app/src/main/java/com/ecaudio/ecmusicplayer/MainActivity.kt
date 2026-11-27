@@ -211,7 +211,7 @@ private fun ECPlayerApp() {
                         it.start()
                         playing = true
                     } else {
-                        val queue = if (queueLatest.isNotEmpty()) songsLatest.filter { it.id in queueLatest } else songsLatest
+                        val queue = if (queueLatest.isNotEmpty()) queueLatest.mapNotNull { id -> songsLatest.firstOrNull { it.id == id } } else songsLatest
                         val nextSong = queue.getOrNull(queue.indexOfFirst { it.id == currentLatest } + 1)
                         if (nextSong != null) playAt(songsLatest.indexOfFirst { it.id == nextSong.id }) else { playing = false; status = "Fin de la lista" }
                     }
@@ -239,7 +239,7 @@ private fun ECPlayerApp() {
 
     fun playNext() {
         if (songs.isEmpty()) return
-        val queue = if (queueLatest.isNotEmpty()) songs.filter { it.id in queueLatest } else songs
+        val queue = if (queueLatest.isNotEmpty()) queueLatest.mapNotNull { id -> songs.firstOrNull { it.id == id } } else songs
         if (queue.isEmpty()) return
         val index = queue.indexOfFirst { it.id == currentId }
         val nextSong = if (shuffle && queue.size > 1) queue.filter { it.id != currentId }.random() else queue[(index + 1).mod(queue.size)]
@@ -438,36 +438,79 @@ private fun ECPlayerApp() {
 
     editingPlaylist?.let { name ->
         val ids = playlists[name] ?: emptyList()
-        AlertDialog(onDismissRequest = { editingPlaylist = null; chooseSongsFor = null }, title = { Text(name) }, text = {
+        val playlistSongs = ids.mapNotNull { id -> songs.firstOrNull { it.id == id } }
+        AlertDialog(onDismissRequest = { editingPlaylist = null; playlistSearch = "" }, title = {
             Column {
-                Text("${ids.size} canciones en esta lista", color = Muted, fontSize = 12.sp)
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = playlistSearch, onValueChange = { playlistSearch = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Buscar música para agregar") }, leadingIcon = { Icon(Icons.Default.Search, null) })
-                Spacer(Modifier.height(6.dp))
-                val q = playlistSearch.trim().lowercase(Locale.ROOT)
-                val candidates = songs.filter { song -> (q.isEmpty() || song.title.lowercase(Locale.ROOT).contains(q) || song.artist.lowercase(Locale.ROOT).contains(q)) }
-                LazyColumn(Modifier.heightIn(max = 300.dp)) {
-                    items(candidates, key = { it.id }) { song ->
-                        Row(Modifier.fillMaxWidth().clickable {
-                            val updated = if (song.id in ids) ids - song.id else ids + song.id
-                            playlists = playlists + (name to updated)
-                            savePlaylists(context, playlists)
-                        }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) { Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 10.sp) }
-                            Checkbox(checked = song.id in ids, onCheckedChange = { checked ->
-                                val updated = if (checked) (ids + song.id).distinct() else ids - song.id
-                                playlists = playlists + (name to updated)
-                                savePlaylists(context, playlists)
-                            }, colors = CheckboxDefaults.colors(checkedColor = Purple))
+                Text(name)
+                Text("${playlistSongs.size} canciones · toca una para reproducirla", color = Muted, fontSize = 11.sp)
+            }
+        }, text = {
+            Column {
+                if (playlistSongs.isEmpty()) {
+                    EmptyState("Esta lista todavía no tiene canciones")
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 190.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(playlistSongs, key = { it.id }) { song ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                    .background(if (song.id == currentId) CardHi else CardBg)
+                                    .clickable {
+                                        queueIds = ids.filter { id -> songs.any { it.id == id } }.distinct()
+                                        selectedSongId = song.id
+                                        playAt(songs.indexOfFirst { it.id == song.id })
+                                        editingPlaylist = null
+                                    }.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SongArtwork(song, Modifier.size(42.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(song.title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(song.artist, color = Muted, fontSize = 10.sp, maxLines = 1)
+                                }
+                                Icon(if (song.id == currentId && playing) Icons.Default.VolumeUp else Icons.Default.PlayArrow, contentDescription = "Reproducir canción", tint = if (song.id == currentId) Cyan else Muted)
+                            }
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                Text("Agregar canciones", color = Color.White, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(value = playlistSearch, onValueChange = { playlistSearch = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Buscar música para agregar") }, leadingIcon = { Icon(Icons.Default.Search, null) })
+                Spacer(Modifier.height(6.dp))
+                val q = playlistSearch.trim().lowercase(Locale.ROOT)
+                val candidates = songs.filter { song ->
+                    song.id !in ids && (q.isEmpty() || song.title.lowercase(Locale.ROOT).contains(q) || song.artist.lowercase(Locale.ROOT).contains(q))
+                }
+                LazyColumn(Modifier.heightIn(max = 150.dp)) {
+                    items(candidates, key = { it.id }) { song ->
+                        Row(Modifier.fillMaxWidth().clickable {
+                            val updated = (ids + song.id).distinct()
+                            playlists = playlists + (name to updated)
+                            savePlaylists(context, playlists)
+                        }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(song.artist, color = Muted, fontSize = 10.sp)
+                            }
+                            IconButton(onClick = {
+                                val updated = (ids + song.id).distinct()
+                                playlists = playlists + (name to updated)
+                                savePlaylists(context, playlists)
+                            }) { Icon(Icons.Default.Add, "Agregar", tint = Cyan) }
+                        }
+                    }
+                }
+                if (candidates.isEmpty()) Text("No hay más canciones que coincidan.", color = Muted, fontSize = 11.sp)
             }
-        }, confirmButton = { TextButton(onClick = { editingPlaylist = null; playlistSearch = "" }) { Text("Listo") } }, dismissButton = { TextButton(onClick = {
-            playlists = playlists - name
-            savePlaylists(context, playlists)
-            editingPlaylist = null
-        }) { Text("Eliminar lista") } })
+        }, confirmButton = {
+            TextButton(onClick = { editingPlaylist = null; playlistSearch = "" }) { Text("Listo") }
+        }, dismissButton = {
+            TextButton(onClick = {
+                playlists = playlists - name
+                savePlaylists(context, playlists)
+                editingPlaylist = null
+            }) { Text("Eliminar lista") }
+        })
     }
 }
 
