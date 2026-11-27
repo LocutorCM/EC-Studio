@@ -78,6 +78,8 @@ private:
     int dragStartX{0};
     int dragOriginalStart{0};
     std::atomic<int> tempo{120};
+    std::atomic<double> engineRate{0.0};
+    bool engineStatusShown{false};
     std::atomic<float> masterGain{1.0f}, peakLeft{0.0f}, peakRight{0.0f}, zoomFactor{1.0f};
     std::atomic<bool> snapEnabled{true};
 

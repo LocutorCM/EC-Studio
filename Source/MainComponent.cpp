@@ -124,7 +124,7 @@ MainComponent::~MainComponent()
 void MainComponent::prepareToPlay(int, double rate)
 {
     sampleRate = rate;
-    statusLabel.setText("ENGINE ONLINE  •  " + juce::String(rate / 1000.0, 1) + " kHz", juce::dontSendNotification);
+    engineRate.store(rate);
 }
 
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
@@ -651,6 +651,8 @@ void MainComponent::paint(juce::Graphics& g)
             if (y + laneHeight > bottom) break;
             auto* t = trackSlots[static_cast<size_t>(i)].load();
             if (t == nullptr) continue;
+            const juce::ScopedTryLock sceneLock(const_cast<juce::CriticalSection&>(audioDataLock));
+            if (!sceneLock.isLocked()) continue;
             g.setColour(i == selectedTrack.load() ? juce::Colour(0xff263747) : (i % 2 ? surface : panel));
             g.fillRect(mainX, y, mainW, laneHeight);
             g.setColour(t->colour);
@@ -925,7 +927,19 @@ void MainComponent::deleteSelectedClip()
 
 void MainComponent::timerCallback()
 {
-    const double seconds = static_cast<double>(playing.load() ? playhead.load() : getSessionLength()) / sampleRate;
+    const double rate = engineRate.load();
+    if (!engineStatusShown && rate > 0.0)
+    {
+        statusLabel.setText("ENGINE ONLINE  •  " + juce::String(rate / 1000.0, 1) + " kHz", juce::dontSendNotification);
+        engineStatusShown = true;
+    }
+    int position = playhead.load();
+    if (!playing.load())
+    {
+        const juce::ScopedTryLock lock(audioDataLock);
+        if (lock.isLocked()) position = getSessionLength();
+    }
+    const double seconds = static_cast<double>(position) / sampleRate;
     timeLabel.setText(juce::String::formatted("%02d:%02d.%03d", static_cast<int>(seconds) / 60,
         static_cast<int>(seconds) % 60, static_cast<int>(std::fmod(seconds, 1.0) * 1000.0)), juce::dontSendNotification);
     repaint();
