@@ -338,6 +338,7 @@ void MainComponent::importAudio()
             const int index = selectedTrack.load();
             Track* t = index >= 0 && index < maxTracks ? trackSlots[static_cast<size_t>(index)].load() : nullptr;
             if (t == nullptr) return;
+            if (t->midi.load()) { statusLabel.setText("SELECT AN AUDIO TRACK TO IMPORT AUDIO", juce::dontSendNotification); return; }
             juce::AudioFormatManager formats;
             formats.registerBasicFormats();
             std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
@@ -395,6 +396,7 @@ void MainComponent::startRecording()
     const int index = selectedTrack.load();
     Track* t = index >= 0 && index < maxTracks ? trackSlots[static_cast<size_t>(index)].load() : nullptr;
     if (t == nullptr) return;
+    if (t->midi.load()) { statusLabel.setText("SELECT AN AUDIO TRACK TO RECORD", juce::dontSendNotification); return; }
     stopTransport();
     {
         const juce::ScopedLock lock(audioDataLock);
@@ -1001,7 +1003,7 @@ void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
     if (sessionView) return;
     const int laneTop = 208;
     const int index = (e.y - laneTop) / 76;
-    if (index < 0 || index >= trackCount.load() || e.x < 386 || e.x >= getWidth() - 220) return;
+    if (e.y < laneTop || index < 0 || index >= trackCount.load() || e.x < 386 || e.x >= getWidth() - 220) return;
     auto* t = trackSlots[static_cast<size_t>(index)].load();
     if (t == nullptr || !t->midi.load()) return;
     const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
