@@ -385,6 +385,7 @@ void MainComponent::stopTransport()
         auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load();
         if (t != nullptr && recorded > 0)
         {
+            t->audio.setSize(2, recorded, true, true, true);
             t->clips.push_back({ 0, recorded, t->start.load() });
             t->start.store(0);
         }
@@ -766,9 +767,9 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         if (scene >= 0 && scene < static_cast<int>(t->clips.size()))
         {
             const auto clip = t->clips[static_cast<size_t>(scene)];
+            stopTransport();
             playhead.store(clip.start);
             playing.store(true);
-            recording.store(false);
             statusLabel.setText("CLIP LAUNCHED  •  " + t->name, juce::dontSendNotification);
         }
         else statusLabel.setText("EMPTY CLIP SLOT", juce::dontSendNotification);
