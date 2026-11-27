@@ -143,6 +143,7 @@ private fun ECPlayerApp() {
     var search by remember { mutableStateOf("") }
     var selectedSongId by remember { mutableStateOf<Long?>(null) }
     var currentId by remember { mutableStateOf<Long?>(null) }
+    var queueIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var playing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Tu música, en un solo lugar") }
     var duration by remember { mutableLongStateOf(0L) }
@@ -209,18 +210,23 @@ private fun ECPlayerApp() {
                         it.start()
                         playing = true
                     } else {
-                        val next = songsLatest.indexOfFirst { s -> s.id == currentLatest } + 1
-                        if (next in songsLatest.indices) playAt(next) else { playing = false; status = "Fin de la lista" }
+                        val queue = if (queueIds.isNotEmpty()) songsLatest.filter { it.id in queueIds } else songsLatest
+                        val nextSong = queue.getOrNull(queue.indexOfFirst { it.id == currentLatest } + 1)
+                        if (nextSong != null) playAt(songsLatest.indexOfFirst { it.id == nextSong.id }) else { playing = false; status = "Fin de la lista" }
                     }
                     RepeatMode.ALWAYS -> { it.seekTo(0); it.start(); playing = true }
                     RepeatMode.ALL -> {
-                        val now = songsLatest.indexOfFirst { s -> s.id == currentLatest }
-                        val next = if (shuffle && songsLatest.size > 1) (songsLatest.indices.filter { it != now }.random()) else (now + 1) % songsLatest.size
-                        playAt(next)
+                        val queue = if (queueIds.isNotEmpty()) songsLatest.filter { it.id in queueIds } else songsLatest
+                        val now = queue.indexOfFirst { it.id == currentLatest }
+                        if (queue.isNotEmpty()) {
+                            val nextSong = if (shuffle && queue.size > 1) queue.filter { it.id != currentLatest }.random() else queue[(now + 1).mod(queue.size)]
+                            playAt(songsLatest.indexOfFirst { it.id == nextSong.id })
+                        }
                     }
                     RepeatMode.OFF -> {
-                        val next = songsLatest.indexOfFirst { s -> s.id == currentLatest } + 1
-                        if (next in songsLatest.indices) playAt(next) else { playing = false; status = "Fin de la lista" }
+                        val queue = if (queueIds.isNotEmpty()) songsLatest.filter { it.id in queueIds } else songsLatest
+                        val nextSong = queue.getOrNull(queue.indexOfFirst { it.id == currentLatest } + 1)
+                        if (nextSong != null) playAt(songsLatest.indexOfFirst { it.id == nextSong.id }) else { playing = false; status = "Fin de la lista" }
                     }
                 }
             }
@@ -232,16 +238,22 @@ private fun ECPlayerApp() {
 
     fun playNext() {
         if (songs.isEmpty()) return
-        val index = songs.indexOfFirst { it.id == currentId }
-        val next = if (shuffle && songs.size > 1) songs.indices.filter { it != index }.random() else (index + 1).mod(songs.size)
-        playAt(next)
+        val queue = if (queueIds.isNotEmpty()) songs.filter { it.id in queueIds } else songs
+        if (queue.isEmpty()) return
+        val index = queue.indexOfFirst { it.id == currentId }
+        val nextSong = if (shuffle && queue.size > 1) queue.filter { it.id != currentId }.random() else queue[(index + 1).mod(queue.size)]
+        playAt(songs.indexOfFirst { it.id == nextSong.id })
     }
     fun playPrevious() {
         if (songs.isEmpty()) return
         if (position > 3000L) { player?.seekTo(0); position = 0L }
         else {
-            val index = songs.indexOfFirst { it.id == currentId }
-            playAt(if (index <= 0) songs.lastIndex else index - 1)
+            val queue = if (queueIds.isNotEmpty()) songs.filter { it.id in queueIds } else songs
+            if (queue.isNotEmpty()) {
+                val index = queue.indexOfFirst { it.id == currentId }
+                val previousSong = queue[if (index <= 0) queue.lastIndex else index - 1]
+                playAt(songs.indexOfFirst { it.id == previousSong.id })
+            }
         }
     }
     fun scan() {
@@ -375,7 +387,7 @@ private fun ECPlayerApp() {
                             if (filtered.isEmpty()) EmptyState(if (songs.isEmpty()) "No se encontró música. Actualiza la biblioteca." else "No hay coincidencias para «$search»")
                             else LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(filtered, key = { it.id }) { song ->
-                                    SongListItem(song, song.id == currentId, onClick = { selectedSongId = song.id; if (currentId != song.id) playAt(songs.indexOfFirst { it.id == song.id }) }, onDelete = { deleteSong(song) })
+                                    SongListItem(song, song.id == currentId, onClick = { queueIds = emptyList(); selectedSongId = song.id; if (currentId != song.id) playAt(songs.indexOfFirst { it.id == song.id }) }, onDelete = { deleteSong(song) })
                                 }
                             }
                         }
@@ -389,8 +401,19 @@ private fun ECPlayerApp() {
                                     Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Default.QueueMusic, null, tint = Purple, modifier = Modifier.size(28.dp))
                                         Spacer(Modifier.width(12.dp))
-                                        Column(Modifier.weight(1f)) { Text(name, color = Color.White, fontWeight = FontWeight.SemiBold); Text("${ids.size} canciones", color = Muted, fontSize = 11.sp) }
-                                        Icon(Icons.Default.ChevronRight, null, tint = Muted)
+                                        Column(Modifier.weight(1f).clickable { editingPlaylist = name }) { Text(name, color = Color.White, fontWeight = FontWeight.SemiBold); Text("${ids.size} canciones", color = Muted, fontSize = 11.sp) }
+                                        IconButton(onClick = {
+                                            val validIds = ids.filter { id -> songs.any { it.id == id } }.distinct()
+                                            val firstSong = songs.firstOrNull { it.id == validIds.firstOrNull() }
+                                            if (firstSong == null) {
+                                                status = if (ids.isEmpty()) "Agrega canciones a esta lista primero" else "Las canciones de esta lista ya no están disponibles"
+                                                editingPlaylist = name
+                                            } else {
+                                                queueIds = validIds
+                                                playAt(songs.indexOfFirst { it.id == firstSong.id })
+                                            }
+                                        }) { Icon(Icons.Default.PlayArrow, "Reproducir lista", tint = Cyan, modifier = Modifier.size(27.dp)) }
+                                        IconButton(onClick = { editingPlaylist = name }) { Icon(Icons.Default.Edit, "Editar lista", tint = Muted) }
                                     }
                                 }
                             }
