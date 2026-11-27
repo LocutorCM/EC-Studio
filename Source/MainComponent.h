@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include <atomic>
+#include <memory>
 #include <vector>
 
 class MainComponent final : public juce::AudioAppComponent, private juce::Timer
@@ -8,54 +10,58 @@ class MainComponent final : public juce::AudioAppComponent, private juce::Timer
 public:
     MainComponent();
     ~MainComponent() override;
-
-    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
-    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
+    void prepareToPlay(int, double) override;
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo&) override;
     void releaseResources() override;
-    void paint(juce::Graphics& g) override;
+    void paint(juce::Graphics&) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent&) override;
 
 private:
     struct Track
     {
         juce::String name;
         juce::Colour colour;
-        bool muted = false;
-        bool solo = false;
-        float gain = 0.85f;
-        float pan = 0.0f;
+        juce::AudioBuffer<float> audio;
+        std::atomic<int> length{0};
+        std::atomic<bool> muted{false}, solo{false}, armed{false};
+        std::atomic<float> gain{0.85f}, pan{0.0f};
     };
 
+    static constexpr int maxTracks = 16;
+    static constexpr int maxTrackSeconds = 300;
     void timerCallback() override;
+    void addTrack();
+    void selectTrack(int);
+    void importAudio();
+    void exportMix();
     void startRecording();
-    void stopTransport();
     void startPlayback();
-    void exportWav();
-    void addAudioTrack();
-    void toggleMixer();
-    void drawWaveform(juce::Graphics& g, juce::Rectangle<int> area);
-    void drawTrackLane(juce::Graphics& g, juce::Rectangle<int> area, int index);
+    void stopTransport();
+    void updateTrackControls();
+    void drawTrack(juce::Graphics&, juce::Rectangle<int>, int);
+    void drawWaveform(juce::Graphics&, juce::Rectangle<int>, const Track&);
+    int getSessionLength() const;
 
-    juce::TextButton recordButton{"●"};
-    juce::TextButton playButton{"▶"};
-    juce::TextButton stopButton{"■"};
-    juce::TextButton exportButton{"Export"};
-    juce::TextButton addTrackButton{"+  Audio"};
+    std::array<std::atomic<Track*>, maxTracks> trackSlots{};
+    std::vector<std::unique_ptr<Track>> tracks;
+    std::atomic<int> trackCount{0}, selectedTrack{0};
+    std::atomic<int> playhead{0};
+    std::atomic<bool> recording{false}, playing{false}, loopEnabled{false}, clickEnabled{false};
+    juce::CriticalSection audioDataLock;
+    double sampleRate{44100.0};
+    int clickCountdown{0};
+    double clickPhase{0.0};
+
+    juce::TextButton recordButton{"●"}, playButton{"▶"}, stopButton{"■"};
+    juce::TextButton newTrackButton{"+ Track"}, importButton{"Import Audio"}, exportButton{"Export Mix"};
     juce::TextButton mixerButton{"Mixer"};
-    juce::TextButton loopButton{"Loop"};
-    juce::TextButton metronomeButton{"Click"};
-    juce::ComboBox tempoBox;
-    juce::Label projectLabel, statusLabel, timeLabel;
-
-    std::vector<Track> tracks;
-    bool mixerVisible = true;
-    int tempo = 120;
-    juce::AudioBuffer<float> recordedAudio;
-    std::atomic<int> recordedSamples{0}, playhead{0};
-    std::atomic<bool> recording{false}, playing{false};
-    double currentSampleRate{44100.0};
-    int maxRecordSamples{0};
-    juce::CriticalSection exportLock;
+    juce::ToggleButton loopButton{"Loop"}, clickButton{"Metronome"};
+    juce::ToggleButton muteButton{"M"}, soloButton{"S"}, armButton{"R"};
+    juce::Slider tempoSlider, gainSlider, panSlider;
+    juce::Label projectLabel, statusLabel, timeLabel, tempoLabel, gainLabel, panLabel;
+    bool mixerVisible{true};
+    int tempo{120};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
