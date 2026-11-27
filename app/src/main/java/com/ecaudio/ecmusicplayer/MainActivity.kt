@@ -163,6 +163,7 @@ private fun ECPlayerApp() {
                 prepared.start()
                 playing = true
                 status = "Reproduciendo"
+                ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", songs.firstOrNull { it.id == currentId }?.title ?: "EC Music Player").putExtra("artist", songs.firstOrNull { it.id == currentId }?.artist ?: "Reproducción de música").putExtra("playing", true))
                 try {
                     val fx = Equalizer(0, prepared.audioSessionId)
                     equalizer = fx
@@ -238,6 +239,7 @@ private fun ECPlayerApp() {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) scan() else status = "Permite el acceso a los archivos de audio"
     }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun requestScan() {
         if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) scan()
         else permissionLauncher.launch(permission)
@@ -274,7 +276,12 @@ private fun ECPlayerApp() {
             }
         }
     }
-    LaunchedEffect(Unit) { requestScan() }
+    LaunchedEffect(Unit) {
+        requestScan()
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     LaunchedEffect(playing, currentId) {
         while (playing) {
             position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
@@ -307,7 +314,7 @@ private fun ECPlayerApp() {
                         val song = songs.firstOrNull { it.id == selectedSongId }
                         if (song != null) PlayerDetail(song, playing, duration, position, repeat, shuffle,
                             onBack = { selectedSongId = null },
-                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false; context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", false)) } else { player?.start(); playing = true; context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", true)) } },
+                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false; ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", false)) } else { player?.start(); playing = true; ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", true)) } },
                             onStop = { try { player?.pause(); player?.seekTo(0) } catch (_: Exception) {}; position = 0L; playing = false },
                             onNext = { playNext() }, onPrevious = { playPrevious() },
                             onRepeat = { repeat = RepeatMode.values()[(repeat.ordinal + 1) % RepeatMode.values().size] },
