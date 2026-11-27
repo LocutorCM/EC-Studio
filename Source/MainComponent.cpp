@@ -22,7 +22,8 @@ void styleButton(juce::Button& b, juce::Colour colour, bool toggle = false)
 
 MainComponent::MainComponent()
 {
-    setSize(1500, 940);\n    setWantsKeyboardFocus(true);
+    setSize(1500, 940);
+    setWantsKeyboardFocus(true);
     setAudioChannels(2, 2);
     addTrack();
     tracks.front()->name = "Audio 1";
@@ -36,7 +37,8 @@ MainComponent::MainComponent()
     styleButton(mixerButton, panel2);
     styleButton(viewButton, accent);
     styleButton(splitButton, panel2);
-    styleButton(deleteClipButton, red);\n    styleButton(snapButton, panel2, true);
+    styleButton(deleteClipButton, red);
+    styleButton(snapButton, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&loopButton), static_cast<juce::Button*>(&clickButton) })
         styleButton(*b, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&muteButton), static_cast<juce::Button*>(&soloButton), static_cast<juce::Button*>(&armButton) })
@@ -51,7 +53,8 @@ MainComponent::MainComponent()
     mixerButton.onClick = [this] { mixerVisible = !mixerVisible; resized(); repaint(); };
     viewButton.onClick = [this] { sessionView = !sessionView; viewButton.setButtonText(sessionView ? "Arrangement View" : "Session View"); repaint(); };
     splitButton.onClick = [this] { splitSelectedClip(); };
-    deleteClipButton.onClick = [this] { deleteSelectedClip(); };\n    snapButton.onClick = [this] { snapEnabled.store(snapButton.getToggleState()); };
+    deleteClipButton.onClick = [this] { deleteSelectedClip(); };
+    snapButton.onClick = [this] { snapEnabled.store(snapButton.getToggleState()); };
     loopButton.onClick = [this] { loopEnabled.store(loopButton.getToggleState()); };
     clickButton.onClick = [this] { clickEnabled.store(clickButton.getToggleState()); };
 
@@ -78,7 +81,11 @@ MainComponent::MainComponent()
     setupSlider(tempoSlider, 40, 240, 120, juce::Slider::LinearHorizontal);
     setupSlider(gainSlider, 0, 1.5, 0.85, juce::Slider::LinearHorizontal);
     setupSlider(panSlider, -1, 1, 0, juce::Slider::LinearHorizontal);
-    setupSlider(masterGainSlider, 0, 1.5, 1.0, juce::Slider::LinearHorizontal);\n    setupSlider(zoomSlider, 0.5, 3.0, 1.0, juce::Slider::LinearHorizontal);\n    zoomSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 42, 20);\n    zoomSlider.onValueChange = [this] { zoomFactor.store(static_cast<float>(zoomSlider.getValue())); repaint(); };\n    addAndMakeVisible(zoomSlider);
+    setupSlider(masterGainSlider, 0, 1.5, 1.0, juce::Slider::LinearHorizontal);
+    setupSlider(zoomSlider, 0.5, 3.0, 1.0, juce::Slider::LinearHorizontal);
+    zoomSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 42, 20);
+    zoomSlider.onValueChange = [this] { zoomFactor.store(static_cast<float>(zoomSlider.getValue())); repaint(); };
+    addAndMakeVisible(zoomSlider);
     masterGainSlider.onValueChange = [this] { masterGain.store(static_cast<float>(masterGainSlider.getValue())); };
     addAndMakeVisible(masterGainSlider);
     tempoSlider.setNumDecimalPlacesToDisplay(0);
@@ -101,7 +108,8 @@ MainComponent::MainComponent()
     tempoLabel.setText("TEMPO", juce::dontSendNotification);
     gainLabel.setText("LEVEL", juce::dontSendNotification);
     panLabel.setText("PAN", juce::dontSendNotification);
-    masterLabel.setText("MASTER", juce::dontSendNotification);\n    zoomLabel.setText("ZOOM", juce::dontSendNotification);
+    masterLabel.setText("MASTER", juce::dontSendNotification);
+    zoomLabel.setText("ZOOM", juce::dontSendNotification);
     for (auto* l : { &projectLabel, &statusLabel, &timeLabel, &tempoLabel, &gainLabel, &panLabel, &masterLabel, &zoomLabel }) addAndMakeVisible(l);
     for (auto* l : { &tempoLabel, &gainLabel, &panLabel, &masterLabel, &zoomLabel }) l->setColour(juce::Label::textColourId, mutedText);
     updateTrackControls();
@@ -940,7 +948,10 @@ void MainComponent::resized()
     mixerButton.setBounds(366, 74, 80, 38);
     viewButton.setBounds(454, 74, 118, 38);
     splitButton.setBounds(580, 74, 68, 38);
-    deleteClipButton.setBounds(656, 74, 100, 38);\n    snapButton.setBounds(764, 78, 62, 30);\n    zoomLabel.setBounds(838, 67, 50, 15);\n    zoomSlider.setBounds(838, 83, 130, 30);
+    deleteClipButton.setBounds(656, 74, 100, 38);
+    snapButton.setBounds(764, 78, 62, 30);
+    zoomLabel.setBounds(838, 67, 50, 15);
+    zoomSlider.setBounds(838, 83, 130, 30);
     const int inspector = getWidth() - 204;
     muteButton.setBounds(inspector + 14, 218, 48, 28);
     soloButton.setBounds(inspector + 68, 218, 48, 28);
