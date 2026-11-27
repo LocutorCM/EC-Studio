@@ -248,7 +248,8 @@ void MainComponent::importAudio()
             formats.registerBasicFormats();
             std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
             if (reader == nullptr) { statusLabel.setText("IMPORT FAILED  •  UNSUPPORTED AUDIO FILE", juce::dontSendNotification); return; }
-            const int length = static_cast<int>(juce::jmin(reader->lengthInSamples, reader->sampleRate * maxTrackSeconds));
+            const auto maxLength = static_cast<juce::int64>(reader->sampleRate * maxTrackSeconds);
+            const int length = static_cast<int>(juce::jmin<juce::int64>(reader->lengthInSamples, maxLength));
             if (length <= 0) return;
             stopTransport();
             const juce::ScopedLock lock(audioDataLock);
@@ -338,12 +339,12 @@ void MainComponent::exportMix()
                     mix.addFrom(1, 0, t->audio, 1, 0, n, gain * (pan < 0.0f ? 1.0f + pan : 1.0f));
                 }
             }
-            juce::FileOutputStream stream(file);
-            if (!stream.openedOk()) { statusLabel.setText("EXPORT FAILED  •  CANNOT WRITE FILE", juce::dontSendNotification); return; }
+            auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
+            if (stream == nullptr || !stream->openedOk()) { statusLabel.setText("EXPORT FAILED  •  CANNOT WRITE FILE", juce::dontSendNotification); return; }
             juce::WavAudioFormat wav;
-            auto* raw = wav.createWriterFor(&stream, sampleRate, 2u, 24, juce::StringPairArray(), 0);
+            auto* raw = wav.createWriterFor(stream.get(), sampleRate, 2u, 24, juce::StringPairArray(), 0);
             if (raw == nullptr) { statusLabel.setText("EXPORT FAILED  •  WAV ENCODER", juce::dontSendNotification); return; }
-            stream.flush();
+            stream.release();
             std::unique_ptr<juce::AudioFormatWriter> writer(raw);
             const bool ok = writer->writeFromAudioSampleBuffer(mix, 0, length);
             writer.reset();

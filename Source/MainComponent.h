@@ -50,7 +50,7 @@ private:
     std::atomic<bool> recording{false}, playing{false}, loopEnabled{false}, clickEnabled{false};
     juce::CriticalSection audioDataLock;
     double sampleRate{44100.0};
-    int clickCountdown{0};
+    std::atomic<int> clickCountdown{0};
     double clickPhase{0.0};
 
     juce::TextButton recordButton{"●"}, playButton{"▶"}, stopButton{"■"};
@@ -61,7 +61,7 @@ private:
     juce::Slider tempoSlider, gainSlider, panSlider;
     juce::Label projectLabel, statusLabel, timeLabel, tempoLabel, gainLabel, panLabel;
     bool mixerVisible{true};
-    int tempo{120};
+    std::atomic<int> tempo{120};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
