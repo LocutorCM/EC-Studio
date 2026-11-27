@@ -38,6 +38,7 @@ MainComponent::MainComponent()
     styleButton(viewButton, accent);
     styleButton(splitButton, panel2);
     styleButton(deleteClipButton, red);
+    styleButton(midiTrackButton, juce::Colour(0xff8f78e8));
     styleButton(snapButton, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&loopButton), static_cast<juce::Button*>(&clickButton) })
         styleButton(*b, panel2, true);
@@ -54,6 +55,7 @@ MainComponent::MainComponent()
     viewButton.onClick = [this] { sessionView = !sessionView; viewButton.setButtonText(sessionView ? "Arrangement View" : "Session View"); repaint(); };
     splitButton.onClick = [this] { splitSelectedClip(); };
     deleteClipButton.onClick = [this] { deleteSelectedClip(); };
+    midiTrackButton.onClick = [this] { addMidiTrack(); };
     snapButton.onClick = [this] { snapEnabled.store(snapButton.getToggleState()); };
     loopButton.onClick = [this] { loopEnabled.store(loopButton.getToggleState()); };
     clickButton.onClick = [this] { clickEnabled.store(clickButton.getToggleState()); };
@@ -62,8 +64,8 @@ MainComponent::MainComponent()
     soloButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->solo.store(soloButton.getToggleState()); };
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
-    const std::array<juce::Component*, 16> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
-        &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &snapButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
+    const std::array<juce::Component*, 17> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
+        &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &snapButton, &midiTrackButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
     auto setupSlider = [](juce::Slider& s, double min, double max, double value, juce::Slider::SliderStyle style)
@@ -204,6 +206,26 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                         if (n > 0 && outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, sourcePos, n, right);
                     }
                 }
+                if (t->midi.load())
+                {
+                    for (const auto& note : t->midiNotes)
+                    {
+                        const int overlapStart = juce::jmax(pos, note.start);
+                        const int overlapEnd = juce::jmin(pos + amount, note.start + note.length);
+                        if (overlapEnd <= overlapStart) continue;
+                        const double frequency = 440.0 * std::pow(2.0, (note.pitch - 69) / 12.0);
+                        for (int sampleIndex = overlapStart; sampleIndex < overlapEnd; ++sampleIndex)
+                        {
+                            const int age = sampleIndex - note.start;
+                            const float envelope = juce::jlimit(0.0f, 1.0f, juce::jmin(age / 64.0f, (note.length - age) / 64.0f));
+                            const float value = static_cast<float>(std::sin(2.0 * juce::MathConstants<double>::pi * frequency * age / sampleRate))
+                                * note.velocity * envelope * 0.18f;
+                            const int outputIndex = info.startSample + sampleIndex - pos;
+                            if (outputs > 0 && out->getNumChannels() > 0) out->addSample(0, outputIndex, value * left);
+                            if (outputs > 1 && out->getNumChannels() > 1) out->addSample(1, outputIndex, value * right);
+                        }
+                    }
+                }
             }
             playhead.store(pos + amount);
             if (loopEnabled.load() && pos + amount >= sessionEnd) playhead.store(0);
@@ -266,6 +288,22 @@ void MainComponent::addTrack()
     selectedTrack.store(index);
     updateTrackControls();
     statusLabel.setText("TRACK CREATED  •  " + raw->name, juce::dontSendNotification);
+    repaint();
+}
+
+void MainComponent::addMidiTrack()
+{
+    addTrack();
+    const int index = selectedTrack.load();
+    if (index >= 0 && index < trackCount.load())
+    {
+        if (auto* t = trackSlots[static_cast<size_t>(index)].load())
+        {
+            t->midi.store(true);
+            t->name = "MIDI " + juce::String(index + 1);
+            statusLabel.setText("MIDI TRACK CREATED", juce::dontSendNotification);
+        }
+    }
     repaint();
 }
 
@@ -346,6 +384,8 @@ int MainComponent::getSessionLength() const
             if (!t->clips.empty())
                 for (const auto& clip : t->clips) length = juce::jmax(length, clip.start + clip.length);
             else length = juce::jmax(length, t->start.load() + t->length.load());
+            if (t->midi.load())
+                for (const auto& note : t->midiNotes) length = juce::jmax(length, note.start + note.length);
         }
     return length;
 }
@@ -449,6 +489,24 @@ void MainComponent::exportMix()
                         mix.addFrom(1, t->start.load(), t->audio, 1, 0, n, rightGain);
                     }
                 }
+                if (t->midi.load())
+                {
+                    for (const auto& note : t->midiNotes)
+                    {
+                        const int begin = juce::jmax(0, note.start);
+                        const int end = juce::jmin(length, note.start + note.length);
+                        const double frequency = 440.0 * std::pow(2.0, (note.pitch - 69) / 12.0);
+                        for (int sampleIndex = begin; sampleIndex < end; ++sampleIndex)
+                        {
+                            const int age = sampleIndex - note.start;
+                            const float envelope = juce::jlimit(0.0f, 1.0f, juce::jmin(age / 64.0f, (note.length - age) / 64.0f));
+                            const float value = static_cast<float>(std::sin(2.0 * juce::MathConstants<double>::pi * frequency * age / sampleRate))
+                                * note.velocity * envelope * 0.18f;
+                            mix.addSample(0, sampleIndex, value * leftGain);
+                            mix.addSample(1, sampleIndex, value * rightGain);
+                        }
+                    }
+                }
             }
             }
             mix.applyGain(masterGain.load());
@@ -511,6 +569,30 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
     g.drawText(flags, header.removeFromTop(18), juce::Justification::centredLeft);
     const juce::ScopedTryLock clipReadLock(const_cast<juce::CriticalSection&>(audioDataLock));
     if (!clipReadLock.isLocked()) return;
+    if (t->midi.load())
+    {
+        const float rowHeight = 2.5f;
+        for (int row = 0; row < 24; ++row)
+        {
+            g.setColour(row % 12 == 0 ? border : juce::Colour(0xff28313c));
+            g.drawHorizontalLine(area.getY() + 8 + static_cast<int>(row * rowHeight),
+                                 static_cast<float>(area.getX()), static_cast<float>(area.getRight()));
+        }
+        const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
+        for (int ni = 0; ni < static_cast<int>(t->midiNotes.size()); ++ni)
+        {
+            const auto& note = t->midiNotes[static_cast<size_t>(ni)];
+            const float x = static_cast<float>(area.getX() + 6) + static_cast<float>(note.start / sampleRate) * pixelsPerSecond;
+            const float width = juce::jmax(8.0f, static_cast<float>(note.length / sampleRate) * pixelsPerSecond);
+            const int row = 71 - note.pitch;
+            const float y = static_cast<float>(area.getY() + 8) + row * rowHeight;
+            auto noteRect = juce::Rectangle<float>(x, y, width, rowHeight + 1.0f).getIntersection(area.toFloat());
+            if (noteRect.isEmpty()) continue;
+            g.setColour(ni == selectedMidiNote ? juce::Colour(0xffffd27a) : t->colour.brighter(0.15f));
+            g.fillRoundedRectangle(noteRect, 1.5f);
+        }
+        return;
+    }
     auto emptyClip = area.reduced(6, 10);
     const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
     if (!t->clips.empty())
@@ -790,6 +872,31 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
     selectedClip = -1;
     auto* t = trackSlots[static_cast<size_t>(index)].load();
     if (t == nullptr) return;
+    if (t->midi.load() && !sessionView)
+    {
+        const juce::ScopedTryLock lock(audioDataLock);
+        if (!lock.isLocked()) return;
+        const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
+        const int laneY = laneTop + index * 76;
+        for (int ni = 0; ni < static_cast<int>(t->midiNotes.size()); ++ni)
+        {
+            const auto& note = t->midiNotes[static_cast<size_t>(ni)];
+            const float x = 386.0f + static_cast<float>(note.start / sampleRate) * pixelsPerSecond;
+            const float w = juce::jmax(8.0f, static_cast<float>(note.length / sampleRate) * pixelsPerSecond);
+            const float y = static_cast<float>(laneY + 8) + (71 - note.pitch) * 2.5f;
+            if (e.x >= x && e.x <= x + w && e.y >= y - 1.0f && e.y <= y + 4.0f)
+            {
+                draggingTrack = index;
+                draggingMidiNote = true;
+                selectedMidiNote = ni;
+                dragStartX = e.x;
+                dragOriginalStart = note.start;
+                dragOriginalPitch = note.pitch;
+                return;
+            }
+        }
+        return;
+    }
     if (sessionView)
     {
         const int scene = (e.x - 380) / 112;
@@ -837,6 +944,23 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    if (draggingMidiNote && draggingTrack >= 0 && draggingTrack < trackCount.load())
+    {
+        auto* midiTrack = trackSlots[static_cast<size_t>(draggingTrack)].load();
+        if (midiTrack == nullptr || selectedMidiNote < 0) return;
+        const juce::ScopedTryLock lock(audioDataLock);
+        if (!lock.isLocked() || selectedMidiNote >= static_cast<int>(midiTrack->midiNotes.size())) return;
+        const float pixelsPerSecond = juce::jmax(1.0f, static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load());
+        const int delta = static_cast<int>((e.x - dragStartX) / pixelsPerSecond * sampleRate);
+        const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
+        const int proposed = juce::jmax(0, dragOriginalStart + delta);
+        midiTrack->midiNotes[static_cast<size_t>(selectedMidiNote)].start = snapEnabled.load()
+            ? static_cast<int>(std::round(static_cast<double>(proposed) / beatSamples)) * beatSamples : proposed;
+        const int pitchDelta = (dragStartY - e.y) / 3;
+        midiTrack->midiNotes[static_cast<size_t>(selectedMidiNote)].pitch = juce::jlimit(48, 71, dragOriginalPitch + pitchDelta);
+        repaint();
+        return;
+    }
     if (draggingMixerTrack >= 0 && draggingMixerTrack < trackCount.load())
     {
         const int mixerY = getHeight() - 194;
@@ -867,6 +991,28 @@ void MainComponent::mouseUp(const juce::MouseEvent&)
     draggingTrack = -1;
     draggingClip = -1;
     draggingMixerTrack = -1;
+    draggingMidiNote = false;
+}
+
+void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    if (sessionView) return;
+    const int laneTop = 208;
+    const int index = (e.y - laneTop) / 76;
+    if (index < 0 || index >= trackCount.load() || e.x < 386 || e.x >= getWidth() - 220) return;
+    auto* t = trackSlots[static_cast<size_t>(index)].load();
+    if (t == nullptr || !t->midi.load()) return;
+    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
+    const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
+    const int rawStart = static_cast<int>((e.x - 386) / pixelsPerSecond * sampleRate);
+    const int start = snapEnabled.load()
+        ? static_cast<int>(std::round(static_cast<double>(rawStart) / beatSamples)) * beatSamples : juce::jmax(0, rawStart);
+    const int pitch = juce::jlimit(48, 71, 71 - juce::jmax(0, (e.y - laneTop - index * 76 - 8) / 3));
+    const juce::ScopedLock lock(audioDataLock);
+    t->midiNotes.push_back({ pitch, start, beatSamples, 0.8f });
+    selectedMidiNote = static_cast<int>(t->midiNotes.size()) - 1;
+    statusLabel.setText("MIDI NOTE CREATED", juce::dontSendNotification);
+    repaint();
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
@@ -964,6 +1110,7 @@ void MainComponent::resized()
     viewButton.setBounds(454, 74, 118, 38);
     splitButton.setBounds(580, 74, 68, 38);
     deleteClipButton.setBounds(656, 74, 100, 38);
+    midiTrackButton.setBounds(976, 74, 46, 38);
     snapButton.setBounds(764, 78, 62, 30);
     zoomLabel.setBounds(838, 67, 50, 15);
     zoomSlider.setBounds(838, 83, 130, 30);

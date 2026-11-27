@@ -18,6 +18,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
     void splitSelectedClip();
     void deleteSelectedClip();
@@ -26,12 +27,15 @@ private:
     struct Track
     {
         struct Clip { int sourceStart{0}; int length{0}; int start{0}; };
+        struct MidiNote { int pitch{60}; int start{0}; int length{22050}; float velocity{0.8f}; };
         juce::String name;
         juce::Colour colour;
         juce::AudioBuffer<float> audio;
         std::atomic<int> length{0};
         std::atomic<int> start{0};
         std::vector<Clip> clips;
+        std::vector<MidiNote> midiNotes;
+        std::atomic<bool> midi{false};
         std::atomic<bool> muted{false}, solo{false}, armed{false};
         std::atomic<float> gain{0.85f}, pan{0.0f};
     };
@@ -40,6 +44,7 @@ private:
     static constexpr int maxTrackSeconds = 300;
     void timerCallback() override;
     void addTrack();
+    void addMidiTrack();
     void selectTrack(int);
     void importAudio();
     void exportMix();
@@ -63,7 +68,7 @@ private:
 
     juce::TextButton recordButton{"●"}, playButton{"▶"}, stopButton{"■"};
     juce::TextButton newTrackButton{"+ Track"}, importButton{"Import Audio"}, exportButton{"Export Mix"};
-    juce::TextButton mixerButton{"Mixer"}, viewButton{"Session View"}, splitButton{"Split"}, deleteClipButton{"Delete Clip"};
+    juce::TextButton mixerButton{"Mixer"}, viewButton{"Session View"}, splitButton{"Split"}, deleteClipButton{"Delete Clip"}, midiTrackButton{"MIDI +"};
     juce::ToggleButton snapButton{"Snap"};
     juce::ToggleButton loopButton{"Loop"}, clickButton{"Metronome"};
     juce::ToggleButton muteButton{"M"}, soloButton{"S"}, armButton{"R"};
@@ -75,6 +80,9 @@ private:
     int draggingClip{-1};
     int selectedClip{-1};
     int draggingMixerTrack{-1};
+    bool draggingMidiNote{false};
+    int selectedMidiNote{-1};
+    int dragOriginalPitch{60};
     int dragStartX{0};
     int dragOriginalStart{0};
     std::atomic<int> tempo{120};
