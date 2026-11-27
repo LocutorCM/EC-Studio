@@ -21,7 +21,7 @@ void MainComponent::prepareToPlay(int,double rate)
 }
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
- auto* out=info.buffer; if(out==nullptr)return; out->clear(info.startSample,info.numSamples);
+ auto* out=info.buffer; if(out==nullptr)return;
  const int inputs=juce::jmin(getTotalNumInputChannels(),2), outputs=juce::jmin(getTotalNumOutputChannels(),2);
  if(recording.load() && inputs>0)
  {
@@ -29,10 +29,11 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
   if(amount>0){ for(int ch=0;ch<2;++ch) recordedAudio.copyFrom(ch,start,*out,juce::jmin(ch,inputs-1),info.startSample,amount); recordedSamples.store(start+amount); }
   else recording.store(false);
  }
+ out->clear(info.startSample,info.numSamples);
  if(playing.load())
  {
   const int pos=playhead.load(), amount=juce::jmin(info.numSamples,juce::jmax(0,recordedSamples.load()-pos));
-  if(amount>0){ for(int ch=0;ch<outputs;++ch) out->copyFrom(ch,info.startSample,recordedAudio,ch,pos,amount); playhead.store(pos+amount); } else playing.store(false);
+  if(amount>0){ for(int ch=0;ch<outputs;++ch) out->copyFrom(inputs+ch,info.startSample,recordedAudio,ch,pos,amount); playhead.store(pos+amount); } else playing.store(false);
  }
 }
 void MainComponent::releaseResources(){}
