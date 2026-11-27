@@ -24,6 +24,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
@@ -32,6 +33,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -320,6 +323,11 @@ private fun ECPlayerApp() {
     }
     DisposableEffect(Unit) { onDispose { PlaybackNotificationBridge.handler = null; releasePlayer(); context.stopService(Intent(context, PlaybackNotificationService::class.java)) } }
 
+    BackHandler(enabled = playing) {
+        if (selectedSongId != null) selectedSongId = null
+        else activity?.moveTaskToBack(true)
+    }
+
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, secondary = Cyan, background = Bg, surface = CardBg)) {
         Scaffold(
             containerColor = Bg,
@@ -458,10 +466,10 @@ private fun SongListItem(song: Song, active: Boolean, onClick: () -> Unit, onDel
 
 @Composable
 private fun PlayerDetail(song: Song, playing: Boolean, duration: Long, position: Long, repeat: RepeatMode, shuffle: Boolean, onBack: () -> Unit, onPlayPause: () -> Unit, onStop: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onRepeat: () -> Unit, onShuffle: () -> Unit, onSeek: (Long) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }; Text("REPRODUCIENDO", color = Muted, fontSize = 11.sp, letterSpacing = 2.sp) }
-        Spacer(Modifier.weight(1f))
-        SongArtwork(song, Modifier.fillMaxWidth().aspectRatio(1f).padding(18.dp))
+        Spacer(Modifier.height(12.dp))
+        SongArtwork(song, Modifier.fillMaxWidth().heightIn(max = 300.dp).aspectRatio(1f).padding(18.dp))
         Text(song.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(song.artist, color = Muted, fontSize = 14.sp)
         Spacer(Modifier.height(26.dp))
@@ -481,7 +489,7 @@ private fun PlayerDetail(song: Song, playing: Boolean, duration: Long, position:
             Spacer(Modifier.width(8.dp))
             Text(when (repeat) { RepeatMode.OFF -> "Repetir: desactivado"; RepeatMode.ONCE -> "Repetir una vez"; RepeatMode.ALWAYS -> "Repetir siempre esta canción"; RepeatMode.ALL -> "Repetir toda la lista" })
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(20.dp))
     }
 }
 
