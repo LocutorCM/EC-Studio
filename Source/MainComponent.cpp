@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <cmath>
 namespace { const juce::Colour background(0xff0b101a), panel(0xff111a29), panelLight(0xff17243a), blue(0xff3296ff), cyan(0xff55d6e8), muted(0xff8292aa), white(0xffedf4ff); }
 MainComponent::MainComponent()
 {
