@@ -53,10 +53,9 @@ MainComponent::MainComponent()
     soloButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->solo.store(soloButton.getToggleState()); };
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
-    for (auto* c : { static_cast<juce::Component*>(&recordButton), &playButton, &stopButton, &newTrackButton,
-                     &importButton, &exportButton, &mixerButton, &loopButton, &clickButton,
-                     &muteButton, &soloButton, &armButton })
-        addAndMakeVisible(c);
+    const std::array<juce::Component*, 12> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
+        &importButton, &exportButton, &mixerButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
+    for (auto* c : controls) addAndMakeVisible(c);
 
     auto setupSlider = [](juce::Slider& s, double min, double max, double value, juce::Slider::SliderStyle style)
     {
@@ -77,7 +76,8 @@ MainComponent::MainComponent()
     tempoSlider.onValueChange = [this] { tempo = static_cast<int>(tempoSlider.getValue()); repaint(); };
     gainSlider.onValueChange = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->gain.store(static_cast<float>(gainSlider.getValue())); };
     panSlider.onValueChange = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->pan.store(static_cast<float>(panSlider.getValue())); };
-    for (auto* c : { static_cast<juce::Component*>(&tempoSlider), &gainSlider, &panSlider }) addAndMakeVisible(c);
+    const std::array<juce::Component*, 3> sliders = { &tempoSlider, &gainSlider, &panSlider };
+    for (auto* c : sliders) addAndMakeVisible(c);
 
     projectLabel.setText("MIDNIGHT SESSION", juce::dontSendNotification);
     projectLabel.setFont(juce::Font(juce::FontOptions(17.0f, juce::Font::bold)));
@@ -176,7 +176,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
     if (clickEnabled.load() && (recording.load() || playing.load()) && outputs > 0)
     {
-        const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo)));
+        const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
         for (int i = 0; i < info.numSamples; ++i)
         {
             if (clickCountdown <= 0) clickCountdown = beatSamples;
@@ -498,7 +498,7 @@ void MainComponent::paint(juce::Graphics& g)
         drawTrack(g, { mainX, y, mainW, laneHeight }, i);
     }
     const double seconds = static_cast<double>(playhead.load()) / sampleRate;
-    const int playX = mainX + 205 + static_cast<int>(seconds * tempo / 60.0 * 42.0 / 4.0);
+    const int playX = mainX + 205 + static_cast<int>(seconds * tempo.load() / 60.0 * 42.0 / 4.0);
     g.setColour(juce::Colour(0xffffe18a));
     g.drawVerticalLine(playX, static_cast<float>(rulerY), static_cast<float>(bottom));
     juce::Path head;
