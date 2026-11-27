@@ -6,7 +6,7 @@ MainComponent::MainComponent()
  auto style=[](juce::TextButton& b, juce::Colour c){ b.setColour(juce::TextButton::buttonColourId,c); b.setColour(juce::TextButton::buttonOnColourId,c.brighter(0.15f)); b.setColour(juce::TextButton::textColourOffId,white); b.setColour(juce::TextButton::textColourOnId,white); };
  style(recordButton,juce::Colour(0xffb8324b)); style(playButton,blue); style(stopButton,panelLight); style(exportButton,juce::Colour(0xff1d6e83));
  recordButton.onClick=[this]{startRecording();}; playButton.onClick=[this]{startPlayback();}; stopButton.onClick=[this]{stopTransport();}; exportButton.onClick=[this]{exportWav();};
- for(auto* c:{static_cast<juce::Component*>(&recordButton),&playButton,&stopButton,&exportButton}) addAndMakeVisible(c);
+ addAndMakeVisible(recordButton); addAndMakeVisible(playButton); addAndMakeVisible(stopButton); addAndMakeVisible(exportButton);
  projectLabel.setText("EC STUDIO  /  UNTITLED SESSION",juce::dontSendNotification); projectLabel.setFont(juce::Font(17.0f,juce::Font::bold)); projectLabel.setColour(juce::Label::textColourId,white); addAndMakeVisible(projectLabel);
  statusLabel.setText("READY  •  AUDIO ENGINE INITIALIZING",juce::dontSendNotification); statusLabel.setFont(juce::Font(12.0f)); statusLabel.setColour(juce::Label::textColourId,muted); addAndMakeVisible(statusLabel);
  timeLabel.setText("00:00.000",juce::dontSendNotification); timeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(),20.0f,juce::Font::bold)); timeLabel.setColour(juce::Label::textColourId,cyan); timeLabel.setJustificationType(juce::Justification::centred); addAndMakeVisible(timeLabel);
