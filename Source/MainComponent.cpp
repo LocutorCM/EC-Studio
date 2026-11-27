@@ -23,7 +23,6 @@ MainComponent::MainComponent()
         b.setColour(juce::TextButton::buttonOnColourId, colour.brighter(0.18f));
         b.setColour(juce::TextButton::textColourOffId, text);
         b.setColour(juce::TextButton::textColourOnId, text);
-        b.setColour(juce::TextButton::outlineColourId, line);
         b.setConnectedEdges(0);
         b.setMouseCursor(juce::MouseCursor::PointingHandCursor);
         b.setButtonText(b.getButtonText());
