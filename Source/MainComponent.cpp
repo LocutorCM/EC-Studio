@@ -8,9 +8,9 @@ MainComponent::MainComponent()
  style(recordButton,juce::Colour(0xffb8324b)); style(playButton,blue); style(stopButton,panelLight); style(exportButton,juce::Colour(0xff1d6e83));
  recordButton.onClick=[this]{startRecording();}; playButton.onClick=[this]{startPlayback();}; stopButton.onClick=[this]{stopTransport();}; exportButton.onClick=[this]{exportWav();};
  addAndMakeVisible(recordButton); addAndMakeVisible(playButton); addAndMakeVisible(stopButton); addAndMakeVisible(exportButton);
- projectLabel.setText("EC STUDIO  /  UNTITLED SESSION",juce::dontSendNotification); projectLabel.setFont(juce::Font(17.0f,juce::Font::bold)); projectLabel.setColour(juce::Label::textColourId,white); addAndMakeVisible(projectLabel);
- statusLabel.setText("READY  •  AUDIO ENGINE INITIALIZING",juce::dontSendNotification); statusLabel.setFont(juce::Font(12.0f)); statusLabel.setColour(juce::Label::textColourId,muted); addAndMakeVisible(statusLabel);
- timeLabel.setText("00:00.000",juce::dontSendNotification); timeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(),20.0f,juce::Font::bold)); timeLabel.setColour(juce::Label::textColourId,cyan); timeLabel.setJustificationType(juce::Justification::centred); addAndMakeVisible(timeLabel);
+ projectLabel.setText("EC STUDIO  /  UNTITLED SESSION",juce::dontSendNotification); projectLabel.setFont(juce::Font(juce::FontOptions(17.0f,juce::Font::bold))); projectLabel.setColour(juce::Label::textColourId,white); addAndMakeVisible(projectLabel);
+ statusLabel.setText("READY  •  AUDIO ENGINE INITIALIZING",juce::dontSendNotification); statusLabel.setFont(juce::Font(juce::FontOptions(12.0f))); statusLabel.setColour(juce::Label::textColourId,muted); addAndMakeVisible(statusLabel);
+ timeLabel.setText("00:00.000",juce::dontSendNotification); timeLabel.setFont(juce::Font(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(),20.0f,juce::Font::bold))); timeLabel.setColour(juce::Label::textColourId,cyan); timeLabel.setJustificationType(juce::Justification::centred); addAndMakeVisible(timeLabel);
  startTimerHz(15);
 }
 MainComponent::~MainComponent(){ shutdownAudio(); }
@@ -23,7 +23,9 @@ void MainComponent::prepareToPlay(int,double rate)
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
  auto* out=info.buffer; if(out==nullptr)return;
- const int inputs=juce::jmin(getTotalNumInputChannels(),2), outputs=juce::jmin(getTotalNumOutputChannels(),2);
+ const auto* audioDevice = deviceManager.getCurrentAudioDevice();
+ const int inputs = audioDevice != nullptr ? juce::jmin(audioDevice->getActiveInputChannels().countNumberOfSetBits(), 2) : 0;
+ const int outputs = audioDevice != nullptr ? juce::jmin(audioDevice->getActiveOutputChannels().countNumberOfSetBits(), 2) : 0;
  if(recording.load() && inputs>0)
  {
   const int start=recordedSamples.load(), amount=juce::jmin(info.numSamples,maxRecordSamples-start);
@@ -51,7 +53,9 @@ void MainComponent::exportWav()
   auto stream=std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
   if(stream==nullptr||!stream->openedOk()){statusLabel.setText("EXPORT FAILED  •  COULD NOT CREATE FILE",juce::dontSendNotification);return;}
   juce::WavAudioFormat wav; auto options=juce::AudioFormatWriterOptions().withSampleRate(currentSampleRate).withNumChannels(2).withBitsPerSample(24);
-  auto writer=wav.createWriterFor(std::move(stream),options);
+  auto* rawWriter = wav.createWriterFor(stream.get(), currentSampleRate, 2u, 24, juce::StringPairArray(), 0);
+  if (rawWriter != nullptr) stream.release();
+  std::unique_ptr<juce::AudioFormatWriter> writer(rawWriter);
   if(writer==nullptr){statusLabel.setText("EXPORT FAILED  •  WAV WRITER ERROR",juce::dontSendNotification);return;}
   const juce::ScopedLock lock(exportLock); const bool ok=writer->writeFromAudioSampleBuffer(recordedAudio,0,length); writer.reset();
   statusLabel.setText(ok?"EXPORTED  •  "+file.getFileName():"EXPORT FAILED",juce::dontSendNotification);
@@ -75,12 +79,12 @@ void MainComponent::drawWaveform(juce::Graphics& g,juce::Rectangle<int> area)
 void MainComponent::paint(juce::Graphics& g)
 {
  g.fillAll(background);g.setColour(panel);g.fillRect(0,0,getWidth(),76);g.setColour(blue);g.fillRect(0,74,getWidth(),2);
- g.setColour(white);g.setFont(juce::Font(26.0f,juce::Font::bold));g.drawText("EC",28,20,36,32,juce::Justification::centredLeft);g.setColour(blue);g.drawText("STUDIO",65,20,115,32,juce::Justification::centredLeft);
- g.setColour(muted);g.setFont(11.0f);g.drawText("DIGITAL AUDIO WORKSTATION  •  PRE-ALPHA",28,51,260,16,juce::Justification::centredLeft);
- g.setColour(panel);g.fillRoundedRectangle(24.0f,100.0f,getWidth()-48.0f,132.0f,12.0f);g.setColour(muted);g.setFont(11.0f);g.drawText("TRANSPORT",44,115,100,18,juce::Justification::centredLeft);g.setColour(white);g.setFont(juce::Font(14.0f,juce::Font::bold));g.drawText("SESSION",44,177,100,18,juce::Justification::centredLeft);
+ g.setColour(white);g.setFont(juce::Font(juce::FontOptions(26.0f,juce::Font::bold)));g.drawText("EC",28,20,36,32,juce::Justification::centredLeft);g.setColour(blue);g.drawText("STUDIO",65,20,115,32,juce::Justification::centredLeft);
+ g.setColour(muted);g.setFont(juce::Font(juce::FontOptions(11.0f)));g.drawText("DIGITAL AUDIO WORKSTATION  •  PRE-ALPHA",28,51,260,16,juce::Justification::centredLeft);
+ g.setColour(panel);g.fillRoundedRectangle(24.0f,100.0f,getWidth()-48.0f,132.0f,12.0f);g.setColour(muted);g.setFont(11.0f);g.drawText("TRANSPORT",44,115,100,18,juce::Justification::centredLeft);g.setColour(white);g.setFont(juce::Font(juce::FontOptions(14.0f,juce::Font::bold)));g.drawText("SESSION",44,177,100,18,juce::Justification::centredLeft);
  g.setColour(panel);g.fillRoundedRectangle(24.0f,252.0f,getWidth()-48.0f,getHeight()-278.0f,12.0f);g.setColour(muted);g.setFont(11.0f);g.drawText("ARRANGEMENT",44,270,150,18,juce::Justification::centredLeft);
  auto track=juce::Rectangle<int>(44,310,getWidth()-88,170);g.setColour(panelLight);g.fillRoundedRectangle(track.toFloat(),8.0f);g.setColour(juce::Colour(0xff293b55));g.drawRoundedRectangle(track.toFloat(),8.0f,1.0f);
- g.setColour(white);g.setFont(juce::Font(13.0f,juce::Font::bold));g.drawText("AUDIO 01",58,324,110,20,juce::Justification::centredLeft);g.setColour(muted);g.setFont(11.0f);g.drawText("INPUT 1–2  •  STEREO",58,347,130,18,juce::Justification::centredLeft);drawWaveform(g,track.withTrimmedLeft(190).withTrimmedTop(18).withTrimmedBottom(18));
+ g.setColour(white);g.setFont(juce::Font(juce::FontOptions(13.0f,juce::Font::bold)));g.drawText("AUDIO 01",58,324,110,20,juce::Justification::centredLeft);g.setColour(muted);g.setFont(11.0f);g.drawText("INPUT 1–2  •  STEREO",58,347,130,18,juce::Justification::centredLeft);drawWaveform(g,track.withTrimmedLeft(190).withTrimmedTop(18).withTrimmedBottom(18));
  g.setColour(muted);g.setFont(11.0f);g.drawText("More tracks, MIDI, plugin hosting and detailed editing are planned for upcoming milestones.",44,getHeight()-48,getWidth()-88,20,juce::Justification::centredLeft);
 }
 void MainComponent::resized()
