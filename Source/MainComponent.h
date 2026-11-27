@@ -22,11 +22,13 @@ public:
 private:
     struct Track
     {
+        struct Clip { int sourceStart{0}; int length{0}; int start{0}; };
         juce::String name;
         juce::Colour colour;
         juce::AudioBuffer<float> audio;
         std::atomic<int> length{0};
         std::atomic<int> start{0};
+        std::vector<Clip> clips;
         std::atomic<bool> muted{false}, solo{false}, armed{false};
         std::atomic<float> gain{0.85f}, pan{0.0f};
     };
@@ -66,6 +68,7 @@ private:
     bool mixerVisible{true};
     bool sessionView{false};
     int draggingTrack{-1};
+    int draggingClip{-1};
     int dragStartX{0};
     int dragOriginalStart{0};
     std::atomic<int> tempo{120};

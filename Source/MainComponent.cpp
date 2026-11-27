@@ -160,17 +160,32 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             {
                 auto* t = trackSlots[static_cast<size_t>(i)].load();
                 if (t == nullptr || t->muted.load() || (hasSolo && !t->solo.load())) continue;
-                const int sourcePos = pos - t->start.load();
-                if (sourcePos < 0) continue;
-                const int available = juce::jmax(0, t->length.load() - sourcePos);
-                const int n = juce::jmin(amount, available);
-                if (n <= 0) continue;
                 const float gain = t->gain.load();
                 const float pan = t->pan.load();
                 const float left = gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
                 const float right = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
-                if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, sourcePos, n, left);
-                if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, sourcePos, n, right);
+                if (!t->clips.empty())
+                {
+                    for (const auto& clip : t->clips)
+                    {
+                        const int sourcePos = pos - clip.start;
+                        if (sourcePos < 0 || sourcePos >= clip.length) continue;
+                        const int n = juce::jmin(amount, clip.length - sourcePos);
+                        const int source = clip.sourceStart + sourcePos;
+                        if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample + sourcePos, t->audio, 0, source, n, left);
+                        if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample + sourcePos, t->audio, 1, source, n, right);
+                    }
+                }
+                else
+                {
+                    const int sourcePos = pos - t->start.load();
+                    if (sourcePos >= 0)
+                    {
+                        const int n = juce::jmin(amount, juce::jmax(0, t->length.load() - sourcePos));
+                        if (n > 0 && outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, sourcePos, n, left);
+                        if (n > 0 && outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, sourcePos, n, right);
+                    }
+                }
             }
             playhead.store(pos + amount);
             if (loopEnabled.load() && pos + amount >= sessionEnd) playhead.store(0);
@@ -273,7 +288,12 @@ int MainComponent::getSessionLength() const
     int length = 0;
     const int count = trackCount.load();
     for (int i = 0; i < count; ++i)
-        if (auto* t = trackSlots[static_cast<size_t>(i)].load()) length = juce::jmax(length, t->start.load() + t->length.load());
+        if (auto* t = trackSlots[static_cast<size_t>(i)].load())
+        {
+            if (!t->clips.empty())
+                for (const auto& clip : t->clips) length = juce::jmax(length, clip.start + clip.length);
+            else length = juce::jmax(length, t->start.load() + t->length.load());
+        }
     return length;
 }
 
@@ -289,6 +309,7 @@ void MainComponent::startRecording()
         t->audio.clear();
         t->length.store(0);
         t->start.store(0);
+        t->clips.clear();
     }
     t->armed.store(true);
     armButton.setToggleState(true, juce::dontSendNotification);
@@ -310,7 +331,19 @@ void MainComponent::startPlayback()
 
 void MainComponent::stopTransport()
 {
-    recording.store(false);
+    const bool wasRecording = recording.exchange(false);
+    if (wasRecording)
+    {
+        const juce::ScopedLock lock(audioDataLock);
+        const int recorded = trackSlots[static_cast<size_t>(selectedTrack.load())].load() != nullptr
+            ? trackSlots[static_cast<size_t>(selectedTrack.load())].load()->length.load() : 0;
+        auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load();
+        if (t != nullptr && recorded > 0)
+        {
+            t->clips.push_back({ 0, recorded, t->start.load() });
+            t->start.store(0);
+        }
+    }
     playing.store(false);
     statusLabel.setText("STOPPED  •  " + juce::String(getSessionLength() / sampleRate, 2) + " s", juce::dontSendNotification);
 }
@@ -337,12 +370,29 @@ void MainComponent::exportMix()
             {
                 auto* t = trackSlots[static_cast<size_t>(i)].load();
                 if (t == nullptr || t->muted.load() || (hasSolo && !t->solo.load())) continue;
-                const int n = juce::jmin(length, t->length.load());
                 const float gain = t->gain.load(), pan = t->pan.load();
-                if (n > 0)
+                const float leftGain = gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
+                const float rightGain = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
+                if (!t->clips.empty())
                 {
-                    mix.addFrom(0, t->start.load(), t->audio, 0, 0, n, gain * (pan > 0.0f ? 1.0f - pan : 1.0f));
-                    mix.addFrom(1, t->start.load(), t->audio, 1, 0, n, gain * (pan < 0.0f ? 1.0f + pan : 1.0f));
+                    for (const auto& clip : t->clips)
+                    {
+                        const int n = juce::jmin(clip.length, length - clip.start);
+                        if (n > 0 && clip.start >= 0)
+                        {
+                            mix.addFrom(0, clip.start, t->audio, 0, clip.sourceStart, n, leftGain);
+                            mix.addFrom(1, clip.start, t->audio, 1, clip.sourceStart, n, rightGain);
+                        }
+                    }
+                }
+                else
+                {
+                    const int n = juce::jmin(t->length.load(), length - t->start.load());
+                    if (n > 0)
+                    {
+                        mix.addFrom(0, t->start.load(), t->audio, 0, 0, n, leftGain);
+                        mix.addFrom(1, t->start.load(), t->audio, 1, 0, n, rightGain);
+                    }
                 }
             }
             auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
@@ -367,15 +417,17 @@ void MainComponent::drawWaveform(juce::Graphics& g, juce::Rectangle<int> area, c
     const juce::ScopedTryLock lock(const_cast<juce::CriticalSection&>(audioDataLock));
     if (!lock.isLocked()) return;
     const int columns = juce::jmax(1, area.getWidth() - 8);
-    const int step = juce::jmax(1, count / columns);
+    const int sourceStart = 0;
+    const int sourceLength = juce::jmin(count, t.audio.getNumSamples());
+    const int step = juce::jmax(1, sourceLength / columns);
     const float mid = area.getCentreY(), amp = area.getHeight() * 0.42f;
     juce::Path wave;
     for (int x = 0; x < columns; ++x)
     {
-        const int start = x * step;
-        if (start >= count) break;
+        const int start = sourceStart + x * step;
+        if (start >= sourceLength) break;
         float peak = 0.0f;
-        for (int n = start; n < juce::jmin(count, start + step); ++n)
+        for (int n = start; n < juce::jmin(sourceLength, start + step); ++n)
             peak = juce::jmax(peak, std::abs(t.audio.getSample(0, n)));
         const float px = static_cast<float>(area.getX() + 4 + x);
         const float h = juce::jmax(1.0f, peak * amp);
