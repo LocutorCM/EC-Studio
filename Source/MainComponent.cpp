@@ -59,7 +59,7 @@ MainComponent::MainComponent()
     soloButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->solo.store(soloButton.getToggleState()); };
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
-    const std::array<juce::Component*, 13> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
+    const std::array<juce::Component*, 15> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
         &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
