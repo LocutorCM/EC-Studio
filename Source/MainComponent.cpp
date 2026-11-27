@@ -495,7 +495,9 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
             clipArea = clipArea.getIntersection(area.toFloat().reduced(0.0f, 5.0f));
             if (!clipArea.isEmpty())
             {
-                g.setColour(t->colour.withAlpha(0.32f));
+                const int clipIndex = static_cast<int>(&item - t->clips.data());
+                const bool isSelected = index == selectedTrack.load() && clipIndex == selectedClip;
+                g.setColour(t->colour.withAlpha(isSelected ? 0.58f : 0.32f));
                 g.fillRoundedRectangle(clipArea, 5.0f);
                 g.setColour(t->colour);
                 g.drawRoundedRectangle(clipArea, 5.0f, 1.0f);
@@ -793,6 +795,8 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
     const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
     const int unsnapped = juce::jmax(0, dragOriginalStart + delta);
     const int snapped = static_cast<int>(std::round(static_cast<double>(unsnapped) / beatSamples)) * beatSamples;
+    const juce::ScopedTryLock lock(audioDataLock);
+    if (!lock.isLocked()) return;
     if (draggingClip >= 0 && draggingClip < static_cast<int>(t->clips.size()))
         t->clips[static_cast<size_t>(draggingClip)].start = snapped;
     else t->start.store(snapped);
@@ -866,7 +870,9 @@ void MainComponent::resized()
     importButton.setBounds(118, 74, 116, 38);
     exportButton.setBounds(246, 74, 108, 38);
     mixerButton.setBounds(366, 74, 80, 38);
-    viewButton.setBounds(454, 74, 118, 38);\n    splitButton.setBounds(580, 74, 68, 38);\n    deleteClipButton.setBounds(656, 74, 100, 38);
+    viewButton.setBounds(454, 74, 118, 38);
+    splitButton.setBounds(580, 74, 68, 38);
+    deleteClipButton.setBounds(656, 74, 100, 38);
     const int inspector = getWidth() - 204;
     muteButton.setBounds(inspector + 14, 218, 48, 28);
     soloButton.setBounds(inspector + 68, 218, 48, 28);
@@ -874,5 +880,7 @@ void MainComponent::resized()
     gainLabel.setBounds(inspector + 14, 266, 70, 18);
     gainSlider.setBounds(inspector + 14, 286, 180, 28);
     panLabel.setBounds(inspector + 14, 322, 70, 18);
-    panSlider.setBounds(inspector + 14, 342, 180, 28);\n    masterLabel.setBounds(getWidth() - 144, getHeight() - 155, 100, 16);\n    masterGainSlider.setBounds(getWidth() - 144, getHeight() - 135, 126, 26);
+    panSlider.setBounds(inspector + 14, 342, 180, 28);
+    masterLabel.setBounds(getWidth() - 144, getHeight() - 155, 100, 16);
+    masterGainSlider.setBounds(getWidth() - 144, getHeight() - 135, 126, 26);
 }
