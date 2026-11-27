@@ -657,14 +657,14 @@ void MainComponent::paint(juce::Graphics& g)
             {
                 const int x = mainX + 190 + scene * sceneWidth;
                 auto cell = juce::Rectangle<int>(x + 5, y + 7, sceneWidth - 10, laneHeight - 14);
-                const bool hasClip = scene == 0 && t->length.load() > 0;
+                const bool hasClip = scene < static_cast<int>(t->clips.size());
                 g.setColour(hasClip ? t->colour.withAlpha(0.28f) : panel2);
                 g.fillRoundedRectangle(cell.toFloat(), 5.0f);
                 g.setColour(hasClip ? t->colour : border);
                 g.drawRoundedRectangle(cell.toFloat(), 5.0f, 1.0f);
                 g.setColour(hasClip ? white : mutedText);
                 g.setFont(juce::Font(juce::FontOptions(9.5f, hasClip ? juce::Font::bold : juce::Font::plain)));
-                g.drawText(hasClip ? t->name + "  •  CLIP" : "+", cell, juce::Justification::centred);
+                g.drawText(hasClip ? "CLIP " + juce::String(scene + 1) : "+", cell, juce::Justification::centred);
             }
             g.setColour(border);
             g.drawHorizontalLine(y + laneHeight, static_cast<float>(mainX), static_cast<float>(mainX + mainW));
@@ -759,6 +759,7 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
     if (e.x < 190 || e.x >= getWidth() - 220 || e.y < laneTop || index < 0 || index >= trackCount.load())
         return;
     selectTrack(index);
+    selectedClip = -1;
     auto* t = trackSlots[static_cast<size_t>(index)].load();
     if (t == nullptr) return;
     if (sessionView)
