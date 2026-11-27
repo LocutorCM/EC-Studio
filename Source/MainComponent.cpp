@@ -172,8 +172,8 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                         if (sourcePos < 0 || sourcePos >= clip.length) continue;
                         const int n = juce::jmin(amount, clip.length - sourcePos);
                         const int source = clip.sourceStart + sourcePos;
-                        if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample + sourcePos, t->audio, 0, source, n, left);
-                        if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample + sourcePos, t->audio, 1, source, n, right);
+                        if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, source, n, left);
+                        if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, source, n, right);
                     }
                 }
                 else
@@ -408,26 +408,24 @@ void MainComponent::exportMix()
         });
 }
 
-void MainComponent::drawWaveform(juce::Graphics& g, juce::Rectangle<int> area, const Track& t)
+void MainComponent::drawWaveform(juce::Graphics& g, juce::Rectangle<int> area, const Track& t, int sourceStart, int sourceLength)
 {
     g.setColour(juce::Colour(0xff193b55));
     g.fillRoundedRectangle(area.toFloat(), 5.0f);
-    const int count = t.length.load();
+    const int count = juce::jmin(sourceLength, t.audio.getNumSamples() - sourceStart);
     if (count <= 0 || t.audio.getNumSamples() <= 0) return;
     const juce::ScopedTryLock lock(const_cast<juce::CriticalSection&>(audioDataLock));
     if (!lock.isLocked()) return;
     const int columns = juce::jmax(1, area.getWidth() - 8);
-    const int sourceStart = 0;
-    const int sourceLength = juce::jmin(count, t.audio.getNumSamples());
-    const int step = juce::jmax(1, sourceLength / columns);
+    const int step = juce::jmax(1, count / columns);
     const float mid = area.getCentreY(), amp = area.getHeight() * 0.42f;
     juce::Path wave;
     for (int x = 0; x < columns; ++x)
     {
         const int start = sourceStart + x * step;
-        if (start >= sourceLength) break;
+        if (start >= sourceStart + count) break;
         float peak = 0.0f;
-        for (int n = start; n < juce::jmin(sourceLength, start + step); ++n)
+        for (int n = start; n < juce::jmin(sourceStart + count, start + step); ++n)
             peak = juce::jmax(peak, std::abs(t.audio.getSample(0, n)));
         const float px = static_cast<float>(area.getX() + 4 + x);
         const float h = juce::jmax(1.0f, peak * amp);
@@ -457,20 +455,38 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
     const juce::String flags = juce::String(t->muted.load() ? "M " : "") + (t->solo.load() ? "S " : "") + (t->armed.load() ? "● REC ARM" : "STEREO AUDIO");
     g.drawText(flags, header.removeFromTop(18), juce::Justification::centredLeft);
     auto emptyClip = area.reduced(6, 10);
-    if (t->length.load() > 0)
+    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
+    if (!t->clips.empty())
     {
-        const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
-        const float clipX = static_cast<float>(area.getX() + 15) + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
+        for (const auto& item : t->clips)
+        {
+            const float clipX = static_cast<float>(area.getX() + 6) + static_cast<float>(item.start / sampleRate) * pixelsPerSecond;
+            const float clipWidth = juce::jmax(40.0f, static_cast<float>(item.length / sampleRate) * pixelsPerSecond);
+            auto clipArea = juce::Rectangle<float>(clipX, static_cast<float>(area.getY() + 10), clipWidth, static_cast<float>(area.getHeight() - 20));
+            clipArea = clipArea.getIntersection(area.toFloat().reduced(0.0f, 5.0f));
+            if (!clipArea.isEmpty())
+            {
+                g.setColour(t->colour.withAlpha(0.32f));
+                g.fillRoundedRectangle(clipArea, 5.0f);
+                g.setColour(t->colour);
+                g.drawRoundedRectangle(clipArea, 5.0f, 1.0f);
+                drawWaveform(g, clipArea.toNearestInt().reduced(4, 5), *t, item.sourceStart, item.length);
+            }
+        }
+    }
+    else if (t->length.load() > 0)
+    {
+        const float clipX = static_cast<float>(area.getX() + 6) + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
         const float clipWidth = juce::jmax(40.0f, static_cast<float>(t->length.load() / sampleRate) * pixelsPerSecond);
-        auto clip = juce::Rectangle<float>(clipX, static_cast<float>(area.getY() + 10), clipWidth, static_cast<float>(area.getHeight() - 20));
-        clip = clip.getIntersection(area.toFloat().reduced(0.0f, 5.0f));
-        if (!clip.isEmpty())
+        auto clipArea = juce::Rectangle<float>(clipX, static_cast<float>(area.getY() + 10), clipWidth, static_cast<float>(area.getHeight() - 20));
+        clipArea = clipArea.getIntersection(area.toFloat().reduced(0.0f, 5.0f));
+        if (!clipArea.isEmpty())
         {
             g.setColour(t->colour.withAlpha(0.32f));
-            g.fillRoundedRectangle(clip, 5.0f);
+            g.fillRoundedRectangle(clipArea, 5.0f);
             g.setColour(t->colour);
-            g.drawRoundedRectangle(clip, 5.0f, 1.0f);
-            drawWaveform(g, clip.toNearestInt().reduced(4, 5), *t);
+            g.drawRoundedRectangle(clipArea, 5.0f, 1.0f);
+            drawWaveform(g, clipArea.toNearestInt().reduced(4, 5), *t, 0, t->length.load());
         }
     }
     else
@@ -683,9 +699,10 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
     if (sessionView)
     {
         const int scene = (e.x - 380) / 112;
-        if (scene == 0 && t->length.load() > 0)
+        if (scene >= 0 && scene < static_cast<int>(t->clips.size()))
         {
-            playhead.store(t->start.load());
+            const auto clip = t->clips[static_cast<size_t>(scene)];
+            playhead.store(clip.start);
             playing.store(true);
             recording.store(false);
             statusLabel.setText("CLIP LAUNCHED  •  " + t->name, juce::dontSendNotification);
@@ -694,13 +711,32 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         return;
     }
     const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
-    const float clipX = static_cast<float>(395) + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
-    const float clipWidth = static_cast<float>(t->length.load() / sampleRate) * pixelsPerSecond;
-    if (t->length.load() > 0 && e.x >= clipX && e.x <= clipX + clipWidth)
+    const float baseX = 386.0f;
+    for (int ci = 0; ci < static_cast<int>(t->clips.size()); ++ci)
     {
-        draggingTrack = index;
-        dragStartX = e.x;
-        dragOriginalStart = t->start.load();
+        const auto& clip = t->clips[static_cast<size_t>(ci)];
+        const float clipX = baseX + static_cast<float>(clip.start / sampleRate) * pixelsPerSecond;
+        const float clipWidth = static_cast<float>(clip.length / sampleRate) * pixelsPerSecond;
+        if (e.x >= clipX && e.x <= clipX + clipWidth)
+        {
+            draggingTrack = index;
+            draggingClip = ci;
+            dragStartX = e.x;
+            dragOriginalStart = clip.start;
+            return;
+        }
+    }
+    if (t->clips.empty())
+    {
+        const float clipX = baseX + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
+        const float clipWidth = static_cast<float>(t->length.load() / sampleRate) * pixelsPerSecond;
+        if (t->length.load() > 0 && e.x >= clipX && e.x <= clipX + clipWidth)
+        {
+            draggingTrack = index;
+            draggingClip = -1;
+            dragStartX = e.x;
+            dragOriginalStart = t->start.load();
+        }
     }
 }
 
@@ -714,13 +750,16 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
     const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
     const int unsnapped = juce::jmax(0, dragOriginalStart + delta);
     const int snapped = static_cast<int>(std::round(static_cast<double>(unsnapped) / beatSamples)) * beatSamples;
-    t->start.store(snapped);
+    if (draggingClip >= 0 && draggingClip < static_cast<int>(t->clips.size()))
+        t->clips[static_cast<size_t>(draggingClip)].start = snapped;
+    else t->start.store(snapped);
     repaint();
 }
 
 void MainComponent::mouseUp(const juce::MouseEvent&)
 {
     draggingTrack = -1;
+    draggingClip = -1;
 }
 
 void MainComponent::timerCallback()

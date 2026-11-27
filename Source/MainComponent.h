@@ -45,7 +45,7 @@ private:
     void stopTransport();
     void updateTrackControls();
     void drawTrack(juce::Graphics&, juce::Rectangle<int>, int);
-    void drawWaveform(juce::Graphics&, juce::Rectangle<int>, const Track&);
+    void drawWaveform(juce::Graphics&, juce::Rectangle<int>, const Track&, int, int);
     int getSessionLength() const;
 
     std::array<std::atomic<Track*>, maxTracks> trackSlots{};
