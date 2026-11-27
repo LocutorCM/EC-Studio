@@ -1079,7 +1079,7 @@ void MainComponent::splitSelectedClip()
 void MainComponent::deleteSelectedClip()
 {
     const int trackIndex = selectedTrack.load();
-    if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
+    if (trackIndex < 0 || trackIndex >= trackCount.load()) return;
     const juce::ScopedLock lock(audioDataLock);
     auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
     if (t == nullptr) return;
