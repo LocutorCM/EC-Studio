@@ -55,7 +55,7 @@ MainComponent::MainComponent()
     soloButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->solo.store(soloButton.getToggleState()); };
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
-    const std::array<juce::Component*, 12> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
+    const std::array<juce::Component*, 13> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
         &importButton, &exportButton, &mixerButton, &viewButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
@@ -659,7 +659,10 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
     if (t == nullptr) return;
     const float pixelsPerSecond = juce::jmax(1.0f, static_cast<float>(tempo.load()) * 0.175f);
     const int delta = static_cast<int>((e.x - dragStartX) / pixelsPerSecond * sampleRate);
-    t->start.store(juce::jmax(0, dragOriginalStart + delta));
+    const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
+    const int unsnapped = juce::jmax(0, dragOriginalStart + delta);
+    const int snapped = static_cast<int>(std::round(static_cast<double>(unsnapped) / beatSamples)) * beatSamples;
+    t->start.store(snapped);
     repaint();
 }
 
