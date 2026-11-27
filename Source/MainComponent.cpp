@@ -870,6 +870,7 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         return;
     selectTrack(index);
     selectedClip = -1;
+    selectedMidiNote = -1;
     auto* t = trackSlots[static_cast<size_t>(index)].load();
     if (t == nullptr) return;
     if (t->midi.load() && !sessionView)
@@ -1038,7 +1039,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 void MainComponent::splitSelectedClip()
 {
     const int trackIndex = selectedTrack.load();
-    if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
+    if (trackIndex < 0 || trackIndex >= trackCount.load()) return;
     const juce::ScopedLock lock(audioDataLock);
     auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
     if (t == nullptr) return;
