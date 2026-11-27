@@ -11,6 +11,15 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.app.RecoverableSecurityException
 import android.content.IntentSender
+import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.app.Service
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -51,7 +60,35 @@ private val Muted = Color(0xFF9292A8)
 
 data class Song(val id: Long, val title: String, val artist: String, val album: String, val uri: android.net.Uri, val duration: Long)
 private enum class Section { MUSIC, PLAYLISTS, EQ }
-private enum class RepeatMode { OFF, ONCE, ALL }
+private enum class RepeatMode { OFF, ONCE, ALWAYS, ALL }
+
+private object PlaybackNotificationBridge { var handler: ((String) -> Unit)? = null }
+
+class PlayerActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) { PlaybackNotificationBridge.handler?.invoke(intent.action ?: return) }
+}
+
+class PlaybackNotificationService : Service() {
+    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val title = intent?.getStringExtra("title") ?: "EC Music Player"
+        val artist = intent?.getStringExtra("artist") ?: "Reproducción de música"
+        val playing = intent?.getBooleanExtra("playing", false) ?: false
+        val manager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("ec_music_playback", "Reproducción", NotificationManager.IMPORTANCE_LOW))
+        fun action(label: String, icon: Int, key: String) = NotificationCompat.Action.Builder(icon, label, android.app.PendingIntent.getBroadcast(this, key.hashCode(), Intent(this, PlayerActionReceiver::class.java).setAction(key), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)).build()
+        val notification = NotificationCompat.Builder(this, "ec_music_playback")
+            .setSmallIcon(R.drawable.ic_music_player).setContentTitle(title).setContentText(artist)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT).setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true).setOnlyAlertOnce(true)
+            .addAction(action("Anterior", android.R.drawable.ic_media_previous, "ec.previous"))
+            .addAction(action(if (playing) "Pausar" else "Reproducir", if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, "ec.toggle"))
+            .addAction(action("Siguiente", android.R.drawable.ic_media_next, "ec.next"))
+            .build()
+        startForeground(41, notification)
+        return START_STICKY
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,7 +123,7 @@ private fun ECPlayerApp() {
     var editingPlaylist by remember { mutableStateOf<String?>(null) }
     var chooseSongsFor by remember { mutableStateOf<String?>(null) }
     var playlistSearch by remember { mutableStateOf("") }
-    var repeatOnceUsed by remember { mutableStateOf(false) }
+    var repeatOnceUsed by remember { mutableStateOf(false) }\n    val activeSong by remember(songs, currentId) { mutableStateOf(songs.firstOrNull { it.id == currentId }) }
     val repeatLatest by rememberUpdatedState(repeat)
     val songsLatest by rememberUpdatedState(songs)
     val currentLatest by rememberUpdatedState(currentId)
@@ -137,7 +174,7 @@ private fun ECPlayerApp() {
                         val next = songsLatest.indexOfFirst { s -> s.id == currentLatest } + 1
                         if (next in songsLatest.indices) playAt(next) else { playing = false; status = "Fin de la lista" }
                     }
-                    RepeatMode.ALL -> {
+                    RepeatMode.ALWAYS -> { it.seekTo(0); it.start(); playing = true }\n                    RepeatMode.ALL -> {
                         val now = songsLatest.indexOfFirst { s -> s.id == currentLatest }
                         val next = if (shuffle && songsLatest.size > 1) (songsLatest.indices.filter { it != now }.random()) else (now + 1) % songsLatest.size
                         playAt(next)
@@ -220,14 +257,14 @@ private fun ECPlayerApp() {
         }
     }
 
-    LaunchedEffect(Unit) { requestScan() }
+    SideEffect {\n        PlaybackNotificationBridge.handler = { action ->\n            when (action) {\n                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }\n                "ec.next" -> playNext()\n                "ec.previous" -> playPrevious()\n            }\n        }\n    }\n    LaunchedEffect(Unit) { requestScan() }
     LaunchedEffect(playing, currentId) {
         while (playing) {
             position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
             delay(1000)
         }
     }
-    DisposableEffect(Unit) { onDispose { releasePlayer() } }
+    DisposableEffect(Unit) { onDispose { PlaybackNotificationBridge.handler = null; releasePlayer() } }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, secondary = Cyan, background = Bg, surface = CardBg)) {
         Scaffold(
@@ -253,7 +290,7 @@ private fun ECPlayerApp() {
                         val song = songs.firstOrNull { it.id == selectedSongId }
                         if (song != null) PlayerDetail(song, playing, duration, position, repeat, shuffle,
                             onBack = { selectedSongId = null },
-                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true } },
+                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false; context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", false)) } else { player?.start(); playing = true; context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", true)) } },
                             onStop = { try { player?.pause(); player?.seekTo(0) } catch (_: Exception) {}; position = 0L; playing = false },
                             onNext = { playNext() }, onPrevious = { playPrevious() },
                             onRepeat = { repeat = RepeatMode.values()[(repeat.ordinal + 1) % RepeatMode.values().size] },
@@ -388,7 +425,7 @@ private fun PlayerDetail(song: Song, playing: Boolean, duration: Long, position:
         OutlinedButton(onClick = onRepeat, shape = RoundedCornerShape(14.dp)) {
             Icon(if (repeat == RepeatMode.ONCE) Icons.Default.RepeatOne else Icons.Default.Repeat, null, tint = if (repeat == RepeatMode.OFF) Muted else Cyan)
             Spacer(Modifier.width(8.dp))
-            Text(when (repeat) { RepeatMode.OFF -> "Repetir: desactivado"; RepeatMode.ONCE -> "Repetir esta canción una vez"; RepeatMode.ALL -> "Repetir toda la lista" })
+            Text(when (repeat) { RepeatMode.OFF -> "Repetir: desactivado"; RepeatMode.ONCE -> "Repetir una vez"; RepeatMode.ALWAYS -> "Repetir siempre esta canción"; RepeatMode.ALL -> "Repetir toda la lista" })
         }
         Spacer(Modifier.weight(1f))
     }
