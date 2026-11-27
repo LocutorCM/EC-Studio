@@ -16,7 +16,7 @@ private:
   explicit MainWindow(const juce::String& name) : DocumentWindow(name, juce::Colour(0xff0b101a), DocumentWindow::allButtons)
   {
    setUsingNativeTitleBar(true); setContentOwned(new MainComponent(), true); setResizable(true, true);
-   centreWithSize(1280, 800); setMinimumSize(900, 600); setVisible(true);
+   centreWithSize(1280, 800); setResizeLimits(900, 600, 8192, 8192); setVisible(true);
   }
   void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
  };
