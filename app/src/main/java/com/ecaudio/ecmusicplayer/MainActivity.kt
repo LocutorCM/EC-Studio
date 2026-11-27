@@ -7,6 +7,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.MediaMetadataRetriever
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.media.audiofx.Equalizer
 import android.os.Build
 import android.os.Bundle
@@ -55,6 +56,9 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import java.util.Locale
 
 private val Bg = Color(0xFF0A0A10)
@@ -80,11 +84,14 @@ class PlaybackNotificationService : Service() {
         val title = intent?.getStringExtra("title") ?: "EC Music Player"
         val artist = intent?.getStringExtra("artist") ?: "Reproducción de música"
         val playing = intent?.getBooleanExtra("playing", false) ?: false
+        val artworkBytes = intent?.getByteArrayExtra("artwork")
+        val artwork = artworkBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel("ec_music_playback", "Reproducción", NotificationManager.IMPORTANCE_LOW))
         fun action(label: String, icon: Int, key: String) = NotificationCompat.Action.Builder(icon, label, android.app.PendingIntent.getBroadcast(this, key.hashCode(), Intent(this, PlayerActionReceiver::class.java).setAction(key), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)).build()
         val notification = NotificationCompat.Builder(this, "ec_music_playback")
             .setSmallIcon(R.drawable.ic_music_player).setContentTitle(title).setContentText(artist)
+            .setLargeIcon(artwork)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT).setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true).setOnlyAlertOnce(true)
             .addAction(action("Anterior", android.R.drawable.ic_media_previous, "ec.previous"))
@@ -93,6 +100,26 @@ class PlaybackNotificationService : Service() {
             .build()
         startForeground(41, notification)
         return START_STICKY
+    }
+}
+
+private fun updatePlaybackNotification(context: Context, song: Song, playing: Boolean) {
+    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        val artwork = try {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, song.uri)
+                retriever.embeddedPicture
+            } finally { retriever.release() }
+        } catch (_: Exception) { null }
+        withContext(kotlinx.coroutines.Dispatchers.Main) {
+            val intent = Intent(context, PlaybackNotificationService::class.java)
+                .putExtra("title", song.title)
+                .putExtra("artist", song.artist)
+                .putExtra("playing", playing)
+                .putExtra("artwork", artwork)
+            try { ContextCompat.startForegroundService(context, intent) } catch (_: Exception) { }
+        }
     }
 }
 
@@ -163,7 +190,7 @@ private fun ECPlayerApp() {
                 prepared.start()
                 playing = true
                 status = "Reproduciendo"
-                ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", songs.firstOrNull { it.id == currentId }?.title ?: "EC Music Player").putExtra("artist", songs.firstOrNull { it.id == currentId }?.artist ?: "Reproducción de música").putExtra("playing", true))
+                updatePlaybackNotification(context, song, true)
                 try {
                     val fx = Equalizer(0, prepared.audioSessionId)
                     equalizer = fx
@@ -239,10 +266,12 @@ private fun ECPlayerApp() {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) scan() else status = "Permite el acceso a los archivos de audio"
     }
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun requestScan() {
         if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) scan()
         else permissionLauncher.launch(permission)
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        requestScan()
     }
     val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
@@ -270,22 +299,23 @@ private fun ECPlayerApp() {
     SideEffect {
         PlaybackNotificationBridge.handler = { action ->
             when (action) {
-                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startForegroundService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }
+                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { updatePlaybackNotification(context, it, playing) } }
                 "ec.next" -> playNext()
                 "ec.previous" -> playPrevious()
             }
         }
     }
     LaunchedEffect(Unit) {
-        requestScan()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            requestScan()
         }
     }
     LaunchedEffect(playing, currentId) {
         while (playing) {
             position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
-            delay(1000)
+            delay(500)
         }
     }
     DisposableEffect(Unit) { onDispose { PlaybackNotificationBridge.handler = null; releasePlayer(); context.stopService(Intent(context, PlaybackNotificationService::class.java)) } }
@@ -314,7 +344,7 @@ private fun ECPlayerApp() {
                         val song = songs.firstOrNull { it.id == selectedSongId }
                         if (song != null) PlayerDetail(song, playing, duration, position, repeat, shuffle,
                             onBack = { selectedSongId = null },
-                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false; ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", false)) } else { player?.start(); playing = true; ContextCompat.startForegroundService(context, Intent(context, PlaybackNotificationService::class.java).putExtra("title", song.title).putExtra("artist", song.artist).putExtra("playing", true)) } },
+                            onPlayPause = { if (player == null) playAt(songs.indexOfFirst { it.id == song.id }) else if (playing) { player?.pause(); playing = false; updatePlaybackNotification(context, song, false) } else { player?.start(); playing = true; updatePlaybackNotification(context, song, true) } },
                             onStop = { try { player?.pause(); player?.seekTo(0) } catch (_: Exception) {}; position = 0L; playing = false },
                             onNext = { playNext() }, onPrevious = { playPrevious() },
                             onRepeat = { repeat = RepeatMode.values()[(repeat.ordinal + 1) % RepeatMode.values().size] },
