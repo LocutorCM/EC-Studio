@@ -847,7 +847,7 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
     if (draggingTrack < 0 || draggingTrack >= trackCount.load()) return;
     auto* t = trackSlots[static_cast<size_t>(draggingTrack)].load();
     if (t == nullptr) return;
-    const float pixelsPerSecond = juce::jmax(1.0f, static_cast<float>(tempo.load()) * 0.175f);
+    const float pixelsPerSecond = juce::jmax(1.0f, static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load());
     const int delta = static_cast<int>((e.x - dragStartX) / pixelsPerSecond * sampleRate);
     const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
     const int unsnapped = juce::jmax(0, dragOriginalStart + delta);
@@ -864,6 +864,7 @@ void MainComponent::mouseUp(const juce::MouseEvent&)
 {
     draggingTrack = -1;
     draggingClip = -1;
+    draggingMixerTrack = -1;
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
