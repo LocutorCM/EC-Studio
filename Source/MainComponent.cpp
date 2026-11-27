@@ -52,7 +52,7 @@ void MainComponent::exportWav()
   const auto file=fc.getResult(); if(file==juce::File{})return;
   auto stream=std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
   if(stream==nullptr||!stream->openedOk()){statusLabel.setText("EXPORT FAILED  •  COULD NOT CREATE FILE",juce::dontSendNotification);return;}
-  juce::WavAudioFormat wav; auto options=juce::AudioFormatWriterOptions().withSampleRate(currentSampleRate).withNumChannels(2).withBitsPerSample(24);
+  juce::WavAudioFormat wav;
   auto* rawWriter = wav.createWriterFor(stream.get(), currentSampleRate, 2u, 24, juce::StringPairArray(), 0);
   if (rawWriter != nullptr) stream.release();
   std::unique_ptr<juce::AudioFormatWriter> writer(rawWriter);
