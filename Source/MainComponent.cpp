@@ -802,7 +802,7 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         else statusLabel.setText("EMPTY CLIP SLOT", juce::dontSendNotification);
         return;
     }
-    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
+    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
     const float baseX = 386.0f;
     for (int ci = 0; ci < static_cast<int>(t->clips.size()); ++ci)
     {
