@@ -257,14 +257,14 @@ private fun ECPlayerApp() {
         }
     }
 
-    SideEffect {\n        PlaybackNotificationBridge.handler = { action ->\n            when (action) {\n                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }\n                "ec.next" -> playNext()\n                "ec.previous" -> playPrevious()\n            }\n        }\n    }\n    LaunchedEffect(Unit) { requestScan() }
+    SideEffect {\n        PlaybackNotificationBridge.handler = { action ->\n            when (action) {\n                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startForegroundService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }\n                "ec.next" -> playNext()\n                "ec.previous" -> playPrevious()\n            }\n        }\n    }\n    LaunchedEffect(Unit) { requestScan() }
     LaunchedEffect(playing, currentId) {
         while (playing) {
             position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
             delay(1000)
         }
     }
-    DisposableEffect(Unit) { onDispose { PlaybackNotificationBridge.handler = null; releasePlayer() } }
+    DisposableEffect(Unit) { onDispose { PlaybackNotificationBridge.handler = null; releasePlayer(); context.stopService(Intent(context, PlaybackNotificationService::class.java)) } }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Purple, secondary = Cyan, background = Bg, surface = CardBg)) {
         Scaffold(
