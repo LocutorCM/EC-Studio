@@ -404,24 +404,30 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
     g.setFont(juce::Font(juce::FontOptions(9.5f)));
     const juce::String flags = juce::String(t->muted.load() ? "M " : "") + (t->solo.load() ? "S " : "") + (t->armed.load() ? "● REC ARM" : "STEREO AUDIO");
     g.drawText(flags, header.removeFromTop(18), juce::Justification::centredLeft);
-    auto clip = area.reduced(6, 10);
+    auto emptyClip = area.reduced(6, 10);
     if (t->length.load() > 0)
     {
-        const int clipWidth = juce::jmax(100, juce::jmin(clip.getWidth(), 100 + static_cast<int>(t->length.load() / sampleRate * 18.0)));
-        clip = clip.withWidth(clipWidth);
-        g.setColour(t->colour.withAlpha(0.32f));
-        g.fillRoundedRectangle(clip.toFloat(), 5.0f);
-        g.setColour(t->colour);
-        g.drawRoundedRectangle(clip.toFloat(), 5.0f, 1.0f);
-        drawWaveform(g, clip.reduced(4, 5), *t);
+        const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
+        const float clipX = static_cast<float>(area.getX() + 15) + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
+        const float clipWidth = juce::jmax(40.0f, static_cast<float>(t->length.load() / sampleRate) * pixelsPerSecond);
+        auto clip = juce::Rectangle<float>(clipX, static_cast<float>(area.getY() + 10), clipWidth, static_cast<float>(area.getHeight() - 20));
+        clip = clip.getIntersection(area.toFloat().reduced(0.0f, 5.0f));
+        if (!clip.isEmpty())
+        {
+            g.setColour(t->colour.withAlpha(0.32f));
+            g.fillRoundedRectangle(clip, 5.0f);
+            g.setColour(t->colour);
+            g.drawRoundedRectangle(clip, 5.0f, 1.0f);
+            drawWaveform(g, clip.toNearestInt().reduced(4, 5), *t);
+        }
     }
     else
     {
         g.setColour(border);
-        g.drawRoundedRectangle(clip.withWidth(juce::jmin(clip.getWidth(), 180)).toFloat(), 5.0f, 1.0f);
+        g.drawRoundedRectangle(emptyClip.withWidth(juce::jmin(emptyClip.getWidth(), 180)).toFloat(), 5.0f, 1.0f);
         g.setColour(mutedText);
         g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("DROP OR IMPORT AUDIO", clip.withWidth(180), juce::Justification::centred);
+        g.drawText("IMPORT OR RECORD AUDIO", emptyClip.withWidth(180), juce::Justification::centred);
     }
     g.setColour(border);
     g.drawHorizontalLine(area.getBottom(), static_cast<float>(area.getX()), static_cast<float>(getWidth() - 220));
@@ -497,11 +503,62 @@ void MainComponent::paint(juce::Graphics& g)
         }
     }
     const int laneHeight = 76;
-    for (int i = 0; i < trackCount.load(); ++i)
+    if (sessionView)
     {
-        const int y = laneTop + i * laneHeight;
-        if (y + laneHeight > bottom) break;
-        drawTrack(g, { mainX, y, mainW, laneHeight }, i);
+        g.setColour(white);
+        g.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
+        g.drawText("TRACK / SCENE", mainX + 14, rulerY + 6, 160, 16, juce::Justification::centredLeft);
+        const int sceneWidth = 112;
+        for (int scene = 0; scene < 8; ++scene)
+        {
+            const int x = mainX + 190 + scene * sceneWidth;
+            g.setColour(mutedText);
+            g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+            g.drawText("SCENE " + juce::String(scene + 1), x + 8, rulerY + 6, sceneWidth - 12, 16, juce::Justification::centredLeft);
+            g.setColour(border);
+            g.drawVerticalLine(x, static_cast<float>(rulerY), static_cast<float>(bottom));
+        }
+        for (int i = 0; i < trackCount.load(); ++i)
+        {
+            const int y = laneTop + i * laneHeight;
+            if (y + laneHeight > bottom) break;
+            auto* t = trackSlots[static_cast<size_t>(i)].load();
+            if (t == nullptr) continue;
+            g.setColour(i == selectedTrack.load() ? juce::Colour(0xff263747) : (i % 2 ? surface : panel));
+            g.fillRect(mainX, y, mainW, laneHeight);
+            g.setColour(t->colour);
+            g.fillRect(mainX, y, 4, laneHeight);
+            g.setColour(white);
+            g.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
+            g.drawText(t->name, mainX + 14, y + 12, 164, 20, juce::Justification::centredLeft);
+            g.setColour(mutedText);
+            g.setFont(juce::Font(juce::FontOptions(9.0f)));
+            g.drawText(t->muted.load() ? "MUTED" : "AUDIO TRACK", mainX + 14, y + 36, 164, 16, juce::Justification::centredLeft);
+            for (int scene = 0; scene < 8; ++scene)
+            {
+                const int x = mainX + 190 + scene * sceneWidth;
+                auto cell = juce::Rectangle<int>(x + 5, y + 7, sceneWidth - 10, laneHeight - 14);
+                const bool hasClip = scene == 0 && t->length.load() > 0;
+                g.setColour(hasClip ? t->colour.withAlpha(0.28f) : panel2);
+                g.fillRoundedRectangle(cell.toFloat(), 5.0f);
+                g.setColour(hasClip ? t->colour : border);
+                g.drawRoundedRectangle(cell.toFloat(), 5.0f, 1.0f);
+                g.setColour(hasClip ? white : mutedText);
+                g.setFont(juce::Font(juce::FontOptions(9.5f, hasClip ? juce::Font::bold : juce::Font::plain)));
+                g.drawText(hasClip ? t->name + "  •  CLIP" : "+", cell, juce::Justification::centred);
+            }
+            g.setColour(border);
+            g.drawHorizontalLine(y + laneHeight, static_cast<float>(mainX), static_cast<float>(mainX + mainW));
+        }
+    }
+    else
+    {
+        for (int i = 0; i < trackCount.load(); ++i)
+        {
+            const int y = laneTop + i * laneHeight;
+            if (y + laneHeight > bottom) break;
+            drawTrack(g, { mainX, y, mainW, laneHeight }, i);
+        }
     }
     const double seconds = static_cast<double>(playhead.load()) / sampleRate;
     const int playX = mainX + 205 + static_cast<int>(seconds * tempo.load() / 60.0 * 42.0 / 4.0);
@@ -566,8 +623,49 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
     const int laneTop = 136 + 44 + 28;
     const int index = (e.y - laneTop) / 76;
-    if (e.x >= 190 && e.x < getWidth() - 220 && e.y >= laneTop && index >= 0 && index < trackCount.load())
-        selectTrack(index);
+    if (e.x < 190 || e.x >= getWidth() - 220 || e.y < laneTop || index < 0 || index >= trackCount.load())
+        return;
+    selectTrack(index);
+    auto* t = trackSlots[static_cast<size_t>(index)].load();
+    if (t == nullptr) return;
+    if (sessionView)
+    {
+        const int scene = (e.x - 380) / 112;
+        if (scene == 0 && t->length.load() > 0)
+        {
+            playhead.store(t->start.load());
+            playing.store(true);
+            recording.store(false);
+            statusLabel.setText("CLIP LAUNCHED  •  " + t->name, juce::dontSendNotification);
+        }
+        else statusLabel.setText("EMPTY CLIP SLOT", juce::dontSendNotification);
+        return;
+    }
+    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
+    const float clipX = static_cast<float>(395) + static_cast<float>(t->start.load() / sampleRate) * pixelsPerSecond;
+    const float clipWidth = static_cast<float>(t->length.load() / sampleRate) * pixelsPerSecond;
+    if (t->length.load() > 0 && e.x >= clipX && e.x <= clipX + clipWidth)
+    {
+        draggingTrack = index;
+        dragStartX = e.x;
+        dragOriginalStart = t->start.load();
+    }
+}
+
+void MainComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (draggingTrack < 0 || draggingTrack >= trackCount.load()) return;
+    auto* t = trackSlots[static_cast<size_t>(draggingTrack)].load();
+    if (t == nullptr) return;
+    const float pixelsPerSecond = juce::jmax(1.0f, static_cast<float>(tempo.load()) * 0.175f);
+    const int delta = static_cast<int>((e.x - dragStartX) / pixelsPerSecond * sampleRate);
+    t->start.store(juce::jmax(0, dragOriginalStart + delta));
+    repaint();
+}
+
+void MainComponent::mouseUp(const juce::MouseEvent&)
+{
+    draggingTrack = -1;
 }
 
 void MainComponent::timerCallback()
