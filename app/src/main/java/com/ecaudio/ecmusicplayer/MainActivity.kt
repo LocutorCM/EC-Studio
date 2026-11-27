@@ -5,6 +5,8 @@ import android.content.ContentUris
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
+import android.graphics.BitmapFactory
 import android.media.audiofx.Equalizer
 import android.os.Build
 import android.os.Bundle
@@ -25,6 +27,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private val Bg = Color(0xFF0A0A10)
@@ -123,7 +129,8 @@ private fun ECPlayerApp() {
     var editingPlaylist by remember { mutableStateOf<String?>(null) }
     var chooseSongsFor by remember { mutableStateOf<String?>(null) }
     var playlistSearch by remember { mutableStateOf("") }
-    var repeatOnceUsed by remember { mutableStateOf(false) }\n    val activeSong by remember(songs, currentId) { mutableStateOf(songs.firstOrNull { it.id == currentId }) }
+    var repeatOnceUsed by remember { mutableStateOf(false) }
+    val activeSong by remember(songs, currentId) { mutableStateOf(songs.firstOrNull { it.id == currentId }) }
     val repeatLatest by rememberUpdatedState(repeat)
     val songsLatest by rememberUpdatedState(songs)
     val currentLatest by rememberUpdatedState(currentId)
@@ -174,7 +181,8 @@ private fun ECPlayerApp() {
                         val next = songsLatest.indexOfFirst { s -> s.id == currentLatest } + 1
                         if (next in songsLatest.indices) playAt(next) else { playing = false; status = "Fin de la lista" }
                     }
-                    RepeatMode.ALWAYS -> { it.seekTo(0); it.start(); playing = true }\n                    RepeatMode.ALL -> {
+                    RepeatMode.ALWAYS -> { it.seekTo(0); it.start(); playing = true }
+                    RepeatMode.ALL -> {
                         val now = songsLatest.indexOfFirst { s -> s.id == currentLatest }
                         val next = if (shuffle && songsLatest.size > 1) (songsLatest.indices.filter { it != now }.random()) else (now + 1) % songsLatest.size
                         playAt(next)
@@ -257,7 +265,16 @@ private fun ECPlayerApp() {
         }
     }
 
-    SideEffect {\n        PlaybackNotificationBridge.handler = { action ->\n            when (action) {\n                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startForegroundService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }\n                "ec.next" -> playNext()\n                "ec.previous" -> playPrevious()\n            }\n        }\n    }\n    LaunchedEffect(Unit) { requestScan() }
+    SideEffect {
+        PlaybackNotificationBridge.handler = { action ->
+            when (action) {
+                "ec.toggle" -> { if (playing) { player?.pause(); playing = false } else { player?.start(); playing = true }; activeSong?.let { context.startForegroundService(Intent(context, PlaybackNotificationService::class.java).putExtra("title", it.title).putExtra("artist", it.artist).putExtra("playing", playing)) } }
+                "ec.next" -> playNext()
+                "ec.previous" -> playPrevious()
+            }
+        }
+    }
+    LaunchedEffect(Unit) { requestScan() }
     LaunchedEffect(playing, currentId) {
         while (playing) {
             position = try { player?.currentPosition?.toLong() ?: 0L } catch (_: Exception) { 0L }
@@ -389,7 +406,7 @@ private fun ECPlayerApp() {
 private fun SongListItem(song: Song, active: Boolean, onClick: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (active) CardHi else CardBg).clickable { onClick() }.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Artwork(Modifier.size(48.dp))
+        SongArtwork(song, Modifier.size(48.dp))
         Spacer(Modifier.width(11.dp))
         Column(Modifier.weight(1f)) { Text(song.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(song.artist, color = Muted, fontSize = 11.sp, maxLines = 1) }
         Text(time(song.duration), color = Muted, fontSize = 10.sp)
@@ -407,7 +424,7 @@ private fun PlayerDetail(song: Song, playing: Boolean, duration: Long, position:
     Column(Modifier.fillMaxSize().padding(horizontal = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) }; Text("REPRODUCIENDO", color = Muted, fontSize = 11.sp, letterSpacing = 2.sp) }
         Spacer(Modifier.weight(1f))
-        Artwork(Modifier.fillMaxWidth().aspectRatio(1f).padding(18.dp))
+        SongArtwork(song, Modifier.fillMaxWidth().aspectRatio(1f).padding(18.dp))
         Text(song.title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(song.artist, color = Muted, fontSize = 14.sp)
         Spacer(Modifier.height(26.dp))
@@ -458,6 +475,30 @@ private fun EqualizerScreen(eq: Equalizer?, enabled: Boolean, values: List<Float
             Spacer(Modifier.height(10.dp))
             Text("El ecualizador usa el efecto de audio disponible en tu dispositivo.", color = Muted, fontSize = 11.sp)
         }
+    }
+}
+
+@Composable
+private fun SongArtwork(song: Song, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var bitmap by remember(song.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(song.id, song.uri) {
+        bitmap = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, song.uri)
+                retriever.embeddedPicture?.let { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
+            } catch (_: Exception) {
+                null
+            } finally {
+                try { retriever.release() } catch (_: Exception) {}
+            }
+        }
+    }
+    if (bitmap != null) {
+        Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Carátula de ${song.title}", modifier = modifier.clip(RoundedCornerShape(12.dp)))
+    } else {
+        Artwork(modifier)
     }
 }
 
