@@ -18,6 +18,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+    bool keyPressed(const juce::KeyPress&) override;
     void splitSelectedClip();
     void deleteSelectedClip();
 
@@ -63,19 +64,22 @@ private:
     juce::TextButton recordButton{"●"}, playButton{"▶"}, stopButton{"■"};
     juce::TextButton newTrackButton{"+ Track"}, importButton{"Import Audio"}, exportButton{"Export Mix"};
     juce::TextButton mixerButton{"Mixer"}, viewButton{"Session View"}, splitButton{"Split"}, deleteClipButton{"Delete Clip"};
+    juce::ToggleButton snapButton{"Snap"};
     juce::ToggleButton loopButton{"Loop"}, clickButton{"Metronome"};
     juce::ToggleButton muteButton{"M"}, soloButton{"S"}, armButton{"R"};
-    juce::Slider tempoSlider, gainSlider, panSlider, masterGainSlider;
-    juce::Label projectLabel, statusLabel, timeLabel, tempoLabel, gainLabel, panLabel, masterLabel;
+    juce::Slider tempoSlider, gainSlider, panSlider, masterGainSlider, zoomSlider;
+    juce::Label projectLabel, statusLabel, timeLabel, tempoLabel, gainLabel, panLabel, masterLabel, zoomLabel;
     bool mixerVisible{true};
     bool sessionView{false};
     int draggingTrack{-1};
     int draggingClip{-1};
     int selectedClip{-1};
+    int draggingMixerTrack{-1};
     int dragStartX{0};
     int dragOriginalStart{0};
     std::atomic<int> tempo{120};
-    std::atomic<float> masterGain{1.0f}, peakLeft{0.0f}, peakRight{0.0f};
+    std::atomic<float> masterGain{1.0f}, peakLeft{0.0f}, peakRight{0.0f}, zoomFactor{1.0f};
+    std::atomic<bool> snapEnabled{true};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

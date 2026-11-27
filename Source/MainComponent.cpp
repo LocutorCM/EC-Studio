@@ -22,7 +22,7 @@ void styleButton(juce::Button& b, juce::Colour colour, bool toggle = false)
 
 MainComponent::MainComponent()
 {
-    setSize(1500, 940);
+    setSize(1500, 940);\n    setWantsKeyboardFocus(true);
     setAudioChannels(2, 2);
     addTrack();
     tracks.front()->name = "Audio 1";
@@ -36,7 +36,7 @@ MainComponent::MainComponent()
     styleButton(mixerButton, panel2);
     styleButton(viewButton, accent);
     styleButton(splitButton, panel2);
-    styleButton(deleteClipButton, red);
+    styleButton(deleteClipButton, red);\n    styleButton(snapButton, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&loopButton), static_cast<juce::Button*>(&clickButton) })
         styleButton(*b, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&muteButton), static_cast<juce::Button*>(&soloButton), static_cast<juce::Button*>(&armButton) })
@@ -51,7 +51,7 @@ MainComponent::MainComponent()
     mixerButton.onClick = [this] { mixerVisible = !mixerVisible; resized(); repaint(); };
     viewButton.onClick = [this] { sessionView = !sessionView; viewButton.setButtonText(sessionView ? "Arrangement View" : "Session View"); repaint(); };
     splitButton.onClick = [this] { splitSelectedClip(); };
-    deleteClipButton.onClick = [this] { deleteSelectedClip(); };
+    deleteClipButton.onClick = [this] { deleteSelectedClip(); };\n    snapButton.onClick = [this] { snapEnabled.store(snapButton.getToggleState()); };
     loopButton.onClick = [this] { loopEnabled.store(loopButton.getToggleState()); };
     clickButton.onClick = [this] { clickEnabled.store(clickButton.getToggleState()); };
 
@@ -59,8 +59,8 @@ MainComponent::MainComponent()
     soloButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->solo.store(soloButton.getToggleState()); };
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
-    const std::array<juce::Component*, 15> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
-        &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
+    const std::array<juce::Component*, 16> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
+        &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &snapButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
     auto setupSlider = [](juce::Slider& s, double min, double max, double value, juce::Slider::SliderStyle style)
@@ -78,7 +78,7 @@ MainComponent::MainComponent()
     setupSlider(tempoSlider, 40, 240, 120, juce::Slider::LinearHorizontal);
     setupSlider(gainSlider, 0, 1.5, 0.85, juce::Slider::LinearHorizontal);
     setupSlider(panSlider, -1, 1, 0, juce::Slider::LinearHorizontal);
-    setupSlider(masterGainSlider, 0, 1.5, 1.0, juce::Slider::LinearHorizontal);
+    setupSlider(masterGainSlider, 0, 1.5, 1.0, juce::Slider::LinearHorizontal);\n    setupSlider(zoomSlider, 0.5, 3.0, 1.0, juce::Slider::LinearHorizontal);\n    zoomSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 42, 20);\n    zoomSlider.onValueChange = [this] { zoomFactor.store(static_cast<float>(zoomSlider.getValue())); repaint(); };\n    addAndMakeVisible(zoomSlider);
     masterGainSlider.onValueChange = [this] { masterGain.store(static_cast<float>(masterGainSlider.getValue())); };
     addAndMakeVisible(masterGainSlider);
     tempoSlider.setNumDecimalPlacesToDisplay(0);
@@ -101,9 +101,9 @@ MainComponent::MainComponent()
     tempoLabel.setText("TEMPO", juce::dontSendNotification);
     gainLabel.setText("LEVEL", juce::dontSendNotification);
     panLabel.setText("PAN", juce::dontSendNotification);
-    masterLabel.setText("MASTER", juce::dontSendNotification);
-    for (auto* l : { &projectLabel, &statusLabel, &timeLabel, &tempoLabel, &gainLabel, &panLabel, &masterLabel }) addAndMakeVisible(l);
-    for (auto* l : { &tempoLabel, &gainLabel, &panLabel, &masterLabel }) l->setColour(juce::Label::textColourId, mutedText);
+    masterLabel.setText("MASTER", juce::dontSendNotification);\n    zoomLabel.setText("ZOOM", juce::dontSendNotification);
+    for (auto* l : { &projectLabel, &statusLabel, &timeLabel, &tempoLabel, &gainLabel, &panLabel, &masterLabel, &zoomLabel }) addAndMakeVisible(l);
+    for (auto* l : { &tempoLabel, &gainLabel, &panLabel, &masterLabel, &zoomLabel }) l->setColour(juce::Label::textColourId, mutedText);
     updateTrackControls();
     startTimerHz(20);
 }
@@ -504,7 +504,7 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
     const juce::ScopedTryLock clipReadLock(const_cast<juce::CriticalSection&>(audioDataLock));
     if (!clipReadLock.isLocked()) return;
     auto emptyClip = area.reduced(6, 10);
-    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
+    const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f * zoomFactor.load();
     if (!t->clips.empty())
     {
         for (const auto& item : t->clips)
@@ -610,7 +610,7 @@ void MainComponent::paint(juce::Graphics& g)
     const int laneTop = rulerY + 28;
     for (int bar = 1; bar <= 64; ++bar)
     {
-        const int x = mainX + 205 + (bar - 1) * 42;
+        const int x = mainX + 205 + static_cast<int>((bar - 1) * 42.0f * zoomFactor.load());
         if (x >= mainX + mainW) break;
         g.setColour(bar % 4 == 1 ? mutedText : border);
         g.drawVerticalLine(x, static_cast<float>(rulerY), static_cast<float>(bottom));
@@ -680,7 +680,7 @@ void MainComponent::paint(juce::Graphics& g)
         }
     }
     const double seconds = static_cast<double>(playhead.load()) / sampleRate;
-    const int playX = mainX + 205 + static_cast<int>(seconds * tempo.load() / 60.0 * 42.0 / 4.0);
+    const int playX = mainX + 205 + static_cast<int>(seconds * tempo.load() / 60.0 * 42.0 / 4.0 * zoomFactor.load());
     g.setColour(juce::Colour(0xffffe18a));
     g.drawVerticalLine(playX, static_cast<float>(rulerY), static_cast<float>(bottom));
     juce::Path head;
@@ -754,6 +754,24 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
+    if (mixerVisible && e.y >= getHeight() - 194)
+    {
+        const int mixerY = getHeight() - 194;
+        for (int i = 0; i < juce::jmin(trackCount.load(), 9); ++i)
+        {
+            const int x = 18 + i * 116;
+            if (e.x >= x + 35 && e.x <= x + 70 && e.y >= mixerY + 110 && e.y <= mixerY + 184)
+            {
+                draggingMixerTrack = i;
+                selectedTrack.store(i);
+                const float level = juce::jlimit(0.0f, 1.5f, (static_cast<float>(mixerY + 184 - e.y) / 70.0f) * 1.5f);
+                if (auto* t = trackSlots[static_cast<size_t>(i)].load()) t->gain.store(level);
+                updateTrackControls();
+                repaint();
+                return;
+            }
+        }
+    }
     const int laneTop = 136 + 44 + 28;
     const int index = (e.y - laneTop) / 76;
     if (e.x < 190 || e.x >= getWidth() - 220 || e.y < laneTop || index < 0 || index >= trackCount.load())
@@ -809,6 +827,15 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
 
 void MainComponent::mouseDrag(const juce::MouseEvent& e)
 {
+    if (draggingMixerTrack >= 0 && draggingMixerTrack < trackCount.load())
+    {
+        const int mixerY = getHeight() - 194;
+        const float level = juce::jlimit(0.0f, 1.5f, (static_cast<float>(mixerY + 184 - e.y) / 70.0f) * 1.5f);
+        if (auto* t = trackSlots[static_cast<size_t>(draggingMixerTrack)].load()) t->gain.store(level);
+        gainSlider.setValue(level, juce::dontSendNotification);
+        repaint();
+        return;
+    }
     if (draggingTrack < 0 || draggingTrack >= trackCount.load()) return;
     auto* t = trackSlots[static_cast<size_t>(draggingTrack)].load();
     if (t == nullptr) return;
@@ -816,7 +843,7 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
     const int delta = static_cast<int>((e.x - dragStartX) / pixelsPerSecond * sampleRate);
     const int beatSamples = juce::jmax(1, static_cast<int>(sampleRate * 60.0 / juce::jmax(40, tempo.load())));
     const int unsnapped = juce::jmax(0, dragOriginalStart + delta);
-    const int snapped = static_cast<int>(std::round(static_cast<double>(unsnapped) / beatSamples)) * beatSamples;
+    const int snapped = snapEnabled.load() ? static_cast<int>(std::round(static_cast<double>(unsnapped) / beatSamples)) * beatSamples : unsnapped;
     const juce::ScopedTryLock lock(audioDataLock);
     if (!lock.isLocked()) return;
     if (draggingClip >= 0 && draggingClip < static_cast<int>(t->clips.size()))
@@ -829,6 +856,25 @@ void MainComponent::mouseUp(const juce::MouseEvent&)
 {
     draggingTrack = -1;
     draggingClip = -1;
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    if (key.getKeyCode() == juce::KeyPress::spaceKey)
+    {
+        if (playing.load() || recording.load()) stopTransport();
+        else startPlayback();
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::deleteKey || key.getKeyCode() == juce::KeyPress::backspaceKey)
+    {
+        deleteSelectedClip();
+        return true;
+    }
+    const auto character = juce::CharacterFunctions::toLowerCase(key.getTextCharacter());
+    if (character == 'r') { startRecording(); return true; }
+    if (character == 's') { splitSelectedClip(); return true; }
+    return false;
 }
 
 void MainComponent::splitSelectedClip()
@@ -894,7 +940,7 @@ void MainComponent::resized()
     mixerButton.setBounds(366, 74, 80, 38);
     viewButton.setBounds(454, 74, 118, 38);
     splitButton.setBounds(580, 74, 68, 38);
-    deleteClipButton.setBounds(656, 74, 100, 38);
+    deleteClipButton.setBounds(656, 74, 100, 38);\n    snapButton.setBounds(764, 78, 62, 30);\n    zoomLabel.setBounds(838, 67, 50, 15);\n    zoomSlider.setBounds(838, 83, 130, 30);
     const int inspector = getWidth() - 204;
     muteButton.setBounds(inspector + 14, 218, 48, 28);
     soloButton.setBounds(inspector + 68, 218, 48, 28);
