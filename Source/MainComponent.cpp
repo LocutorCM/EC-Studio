@@ -296,16 +296,32 @@ void MainComponent::importAudio()
             formats.registerBasicFormats();
             std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
             if (reader == nullptr) { statusLabel.setText("IMPORT FAILED  •  UNSUPPORTED AUDIO FILE", juce::dontSendNotification); return; }
-            const auto maxLength = static_cast<juce::int64>(reader->sampleRate * maxTrackSeconds);
-            const int length = static_cast<int>(juce::jmin<juce::int64>(reader->lengthInSamples, maxLength));
-            if (length <= 0) return;
+            const auto maxLength = static_cast<juce::int64>(sampleRate * maxTrackSeconds);
+            const int sourceLength = static_cast<int>(juce::jmin<juce::int64>(reader->lengthInSamples,
+                static_cast<juce::int64>(reader->sampleRate * maxTrackSeconds)));
+            const int length = static_cast<int>(std::llround(sourceLength * sampleRate / reader->sampleRate));
+            if (length <= 0 || sourceLength <= 0) return;
             stopTransport();
+            juce::AudioBuffer<float> source(2, sourceLength + 4);
+            source.clear();
+            reader->read(&source, 0, sourceLength, 0, true, true);
+            juce::AudioBuffer<float> converted(2, length);
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                juce::LagrangeInterpolator resampler;
+                resampler.process(reader->sampleRate / sampleRate, source.getReadPointer(channel),
+                                  converted.getWritePointer(channel), length);
+            }
             const juce::ScopedLock lock(audioDataLock);
-            t->audio.setSize(2, length);
-            t->audio.clear();
-            reader->read(&t->audio, 0, length, 0, true, true);
-            t->start.store(0);
-            t->length.store(length);
+            const int sourceStart = t->audio.getNumSamples();
+            if (sourceStart + length > maxLength) { statusLabel.setText("TRACK AUDIO LIMIT REACHED", juce::dontSendNotification); return; }
+            t->audio.setSize(2, sourceStart + length, true, true, true);
+            t->audio.copyFrom(0, sourceStart, converted, 0, 0, length);
+            t->audio.copyFrom(1, sourceStart, converted, 1, 0, length);
+            const int clipStart = getSessionLength();
+            t->clips.push_back({ sourceStart, length, clipStart });
+            t->start.store(clipStart);
+            t->length.store(sourceStart + length);
             playhead.store(0);
             statusLabel.setText("IMPORTED  •  " + file.getFileName(), juce::dontSendNotification);
             repaint();
@@ -390,6 +406,7 @@ void MainComponent::exportMix()
             if (file == juce::File{}) return;
             juce::AudioBuffer<float> mix(2, length);
             mix.clear();
+            {
             const juce::ScopedLock lock(audioDataLock);
             const int count = trackCount.load();
             bool hasSolo = false;
@@ -424,6 +441,8 @@ void MainComponent::exportMix()
                     }
                 }
             }
+            }
+            mix.applyGain(masterGain.load());
             auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
             if (stream == nullptr || !stream->openedOk()) { statusLabel.setText("EXPORT FAILED  •  CANNOT WRITE FILE", juce::dontSendNotification); return; }
             juce::WavAudioFormat wav;
@@ -766,6 +785,7 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         {
             draggingTrack = index;
             draggingClip = ci;
+            selectedClip = ci;
             dragStartX = e.x;
             dragOriginalStart = clip.start;
             return;
