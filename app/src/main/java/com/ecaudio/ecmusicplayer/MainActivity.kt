@@ -164,6 +164,7 @@ private fun ECPlayerApp() {
     val activeSong by remember(songs, currentId) { mutableStateOf(songs.firstOrNull { it.id == currentId }) }
     val repeatLatest by rememberUpdatedState(repeat)
     val songsLatest by rememberUpdatedState(songs)
+    val queueLatest by rememberUpdatedState(queueIds)
     val currentLatest by rememberUpdatedState(currentId)
 
     fun releasePlayer() {
@@ -210,7 +211,7 @@ private fun ECPlayerApp() {
                         it.start()
                         playing = true
                     } else {
-                        val queue = if (queueIds.isNotEmpty()) songsLatest.filter { it.id in queueIds } else songsLatest
+                        val queue = if (queueLatest.isNotEmpty()) songsLatest.filter { it.id in queueLatest } else songsLatest
                         val nextSong = queue.getOrNull(queue.indexOfFirst { it.id == currentLatest } + 1)
                         if (nextSong != null) playAt(songsLatest.indexOfFirst { it.id == nextSong.id }) else { playing = false; status = "Fin de la lista" }
                     }
@@ -238,7 +239,7 @@ private fun ECPlayerApp() {
 
     fun playNext() {
         if (songs.isEmpty()) return
-        val queue = if (queueIds.isNotEmpty()) songs.filter { it.id in queueIds } else songs
+        val queue = if (queueLatest.isNotEmpty()) songs.filter { it.id in queueLatest } else songs
         if (queue.isEmpty()) return
         val index = queue.indexOfFirst { it.id == currentId }
         val nextSong = if (shuffle && queue.size > 1) queue.filter { it.id != currentId }.random() else queue[(index + 1).mod(queue.size)]
