@@ -957,7 +957,7 @@ void MainComponent::mouseDrag(const juce::MouseEvent& e)
         const int proposed = juce::jmax(0, dragOriginalStart + delta);
         midiTrack->midiNotes[static_cast<size_t>(selectedMidiNote)].start = snapEnabled.load()
             ? static_cast<int>(std::round(static_cast<double>(proposed) / beatSamples)) * beatSamples : proposed;
-        const int pitchDelta = (dragStartY - e.y) / 3;
+        const int pitchDelta = static_cast<int>((dragStartY - e.y) / 2.5f);
         midiTrack->midiNotes[static_cast<size_t>(selectedMidiNote)].pitch = juce::jlimit(48, 71, dragOriginalPitch + pitchDelta);
         repaint();
         return;
@@ -1008,7 +1008,7 @@ void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
     const int rawStart = static_cast<int>((e.x - 386) / pixelsPerSecond * sampleRate);
     const int start = snapEnabled.load()
         ? static_cast<int>(std::round(static_cast<double>(rawStart) / beatSamples)) * beatSamples : juce::jmax(0, rawStart);
-    const int pitch = juce::jlimit(48, 71, 71 - juce::jmax(0, (e.y - laneTop - index * 76 - 8) / 3));
+    const int pitch = juce::jlimit(48, 71, 71 - juce::jmax(0, static_cast<int>((e.y - laneTop - index * 76 - 8) / 2.5f)));
     const juce::ScopedLock lock(audioDataLock);
     t->midiNotes.push_back({ pitch, start, beatSamples, 0.8f });
     selectedMidiNote = static_cast<int>(t->midiNotes.size()) - 1;
@@ -1041,7 +1041,23 @@ void MainComponent::splitSelectedClip()
     if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
     const juce::ScopedLock lock(audioDataLock);
     auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
-    if (t == nullptr || selectedClip >= static_cast<int>(t->clips.size())) return;
+    if (t == nullptr) return;
+    if (t->midi.load())
+    {
+        if (selectedMidiNote < 0 || selectedMidiNote >= static_cast<int>(t->midiNotes.size())) return;
+        auto note = t->midiNotes[static_cast<size_t>(selectedMidiNote)];
+        const int offset = playhead.load() - note.start;
+        if (offset <= 0 || offset >= note.length) return;
+        t->midiNotes[static_cast<size_t>(selectedMidiNote)].length = offset;
+        note.start += offset;
+        note.length -= offset;
+        t->midiNotes.insert(t->midiNotes.begin() + selectedMidiNote + 1, note);
+        selectedMidiNote += 1;
+        statusLabel.setText("MIDI NOTE SPLIT", juce::dontSendNotification);
+        repaint();
+        return;
+    }
+    if (selectedClip >= static_cast<int>(t->clips.size())) return;
     auto clip = t->clips[static_cast<size_t>(selectedClip)];
     const int splitAt = playhead.load();
     const int offset = splitAt - clip.start;
@@ -1065,7 +1081,17 @@ void MainComponent::deleteSelectedClip()
     if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
     const juce::ScopedLock lock(audioDataLock);
     auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
-    if (t == nullptr || selectedClip >= static_cast<int>(t->clips.size())) return;
+    if (t == nullptr) return;
+    if (t->midi.load())
+    {
+        if (selectedMidiNote < 0 || selectedMidiNote >= static_cast<int>(t->midiNotes.size())) return;
+        t->midiNotes.erase(t->midiNotes.begin() + selectedMidiNote);
+        selectedMidiNote = -1;
+        statusLabel.setText("MIDI NOTE DELETED", juce::dontSendNotification);
+        repaint();
+        return;
+    }
+    if (selectedClip >= static_cast<int>(t->clips.size())) return;
     t->clips.erase(t->clips.begin() + selectedClip);
     selectedClip = -1;
     statusLabel.setText("CLIP DELETED", juce::dontSendNotification);
