@@ -16,6 +16,8 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override;
 
 private:
     struct Track
@@ -24,6 +26,7 @@ private:
         juce::Colour colour;
         juce::AudioBuffer<float> audio;
         std::atomic<int> length{0};
+        std::atomic<int> start{0};
         std::atomic<bool> muted{false}, solo{false}, armed{false};
         std::atomic<float> gain{0.85f}, pan{0.0f};
     };
@@ -55,12 +58,16 @@ private:
 
     juce::TextButton recordButton{"●"}, playButton{"▶"}, stopButton{"■"};
     juce::TextButton newTrackButton{"+ Track"}, importButton{"Import Audio"}, exportButton{"Export Mix"};
-    juce::TextButton mixerButton{"Mixer"};
+    juce::TextButton mixerButton{"Mixer"}, viewButton{"Session View"};
     juce::ToggleButton loopButton{"Loop"}, clickButton{"Metronome"};
     juce::ToggleButton muteButton{"M"}, soloButton{"S"}, armButton{"R"};
     juce::Slider tempoSlider, gainSlider, panSlider;
     juce::Label projectLabel, statusLabel, timeLabel, tempoLabel, gainLabel, panLabel;
     bool mixerVisible{true};
+    bool sessionView{false};
+    int draggingTrack{-1};
+    int dragStartX{0};
+    int dragOriginalStart{0};
     std::atomic<int> tempo{120};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

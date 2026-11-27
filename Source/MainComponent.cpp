@@ -34,6 +34,7 @@ MainComponent::MainComponent()
     styleButton(importButton, panel2);
     styleButton(exportButton, green);
     styleButton(mixerButton, panel2);
+    styleButton(viewButton, accent);
     for (auto* b : { static_cast<juce::Button*>(&loopButton), static_cast<juce::Button*>(&clickButton) })
         styleButton(*b, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&muteButton), static_cast<juce::Button*>(&soloButton), static_cast<juce::Button*>(&armButton) })
@@ -46,6 +47,7 @@ MainComponent::MainComponent()
     importButton.onClick = [this] { importAudio(); };
     exportButton.onClick = [this] { exportMix(); };
     mixerButton.onClick = [this] { mixerVisible = !mixerVisible; resized(); repaint(); };
+    viewButton.onClick = [this] { sessionView = !sessionView; viewButton.setButtonText(sessionView ? "Arrangement View" : "Session View"); repaint(); };
     loopButton.onClick = [this] { loopEnabled.store(loopButton.getToggleState()); };
     clickButton.onClick = [this] { clickEnabled.store(clickButton.getToggleState()); };
 
@@ -54,7 +56,7 @@ MainComponent::MainComponent()
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
     const std::array<juce::Component*, 12> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
-        &importButton, &exportButton, &mixerButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
+        &importButton, &exportButton, &mixerButton, &viewButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
     auto setupSlider = [](juce::Slider& s, double min, double max, double value, juce::Slider::SliderStyle style)
@@ -158,15 +160,17 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             {
                 auto* t = trackSlots[static_cast<size_t>(i)].load();
                 if (t == nullptr || t->muted.load() || (hasSolo && !t->solo.load())) continue;
-                const int available = juce::jmax(0, t->length.load() - pos);
+                const int sourcePos = pos - t->start.load();
+                if (sourcePos < 0) continue;
+                const int available = juce::jmax(0, t->length.load() - sourcePos);
                 const int n = juce::jmin(amount, available);
                 if (n <= 0) continue;
                 const float gain = t->gain.load();
                 const float pan = t->pan.load();
                 const float left = gain * (pan > 0.0f ? 1.0f - pan : 1.0f);
                 const float right = gain * (pan < 0.0f ? 1.0f + pan : 1.0f);
-                if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, pos, n, left);
-                if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, pos, n, right);
+                if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, sourcePos, n, left);
+                if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, sourcePos, n, right);
             }
             playhead.store(pos + amount);
             if (loopEnabled.load() && pos + amount >= sessionEnd) playhead.store(0);
@@ -256,6 +260,7 @@ void MainComponent::importAudio()
             t->audio.setSize(2, length);
             t->audio.clear();
             reader->read(&t->audio, 0, length, 0, true, true);
+            t->start.store(0);
             t->length.store(length);
             playhead.store(0);
             statusLabel.setText("IMPORTED  •  " + file.getFileName(), juce::dontSendNotification);
@@ -268,7 +273,7 @@ int MainComponent::getSessionLength() const
     int length = 0;
     const int count = trackCount.load();
     for (int i = 0; i < count; ++i)
-        if (auto* t = trackSlots[static_cast<size_t>(i)].load()) length = juce::jmax(length, t->length.load());
+        if (auto* t = trackSlots[static_cast<size_t>(i)].load()) length = juce::jmax(length, t->start.load() + t->length.load());
     return length;
 }
 
@@ -283,6 +288,7 @@ void MainComponent::startRecording()
         t->audio.setSize(2, static_cast<int>(sampleRate * maxTrackSeconds));
         t->audio.clear();
         t->length.store(0);
+        t->start.store(0);
     }
     t->armed.store(true);
     armButton.setToggleState(true, juce::dontSendNotification);
@@ -335,8 +341,8 @@ void MainComponent::exportMix()
                 const float gain = t->gain.load(), pan = t->pan.load();
                 if (n > 0)
                 {
-                    mix.addFrom(0, 0, t->audio, 0, 0, n, gain * (pan > 0.0f ? 1.0f - pan : 1.0f));
-                    mix.addFrom(1, 0, t->audio, 1, 0, n, gain * (pan < 0.0f ? 1.0f + pan : 1.0f));
+                    mix.addFrom(0, t->start.load(), t->audio, 0, 0, n, gain * (pan > 0.0f ? 1.0f - pan : 1.0f));
+                    mix.addFrom(1, t->start.load(), t->audio, 1, 0, n, gain * (pan < 0.0f ? 1.0f + pan : 1.0f));
                 }
             }
             auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
@@ -588,6 +594,7 @@ void MainComponent::resized()
     importButton.setBounds(118, 74, 116, 38);
     exportButton.setBounds(246, 74, 108, 38);
     mixerButton.setBounds(366, 74, 80, 38);
+    viewButton.setBounds(454, 74, 118, 38);
     const int inspector = getWidth() - 204;
     muteButton.setBounds(inspector + 14, 218, 48, 28);
     soloButton.setBounds(inspector + 68, 218, 48, 28);
