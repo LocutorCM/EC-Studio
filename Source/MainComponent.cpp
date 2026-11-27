@@ -35,6 +35,8 @@ MainComponent::MainComponent()
     styleButton(exportButton, green);
     styleButton(mixerButton, panel2);
     styleButton(viewButton, accent);
+    styleButton(splitButton, panel2);
+    styleButton(deleteClipButton, red);
     for (auto* b : { static_cast<juce::Button*>(&loopButton), static_cast<juce::Button*>(&clickButton) })
         styleButton(*b, panel2, true);
     for (auto* b : { static_cast<juce::Button*>(&muteButton), static_cast<juce::Button*>(&soloButton), static_cast<juce::Button*>(&armButton) })
@@ -48,6 +50,8 @@ MainComponent::MainComponent()
     exportButton.onClick = [this] { exportMix(); };
     mixerButton.onClick = [this] { mixerVisible = !mixerVisible; resized(); repaint(); };
     viewButton.onClick = [this] { sessionView = !sessionView; viewButton.setButtonText(sessionView ? "Arrangement View" : "Session View"); repaint(); };
+    splitButton.onClick = [this] { splitSelectedClip(); };
+    deleteClipButton.onClick = [this] { deleteSelectedClip(); };
     loopButton.onClick = [this] { loopEnabled.store(loopButton.getToggleState()); };
     clickButton.onClick = [this] { clickEnabled.store(clickButton.getToggleState()); };
 
@@ -56,7 +60,7 @@ MainComponent::MainComponent()
     armButton.onClick = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->armed.store(armButton.getToggleState()); };
 
     const std::array<juce::Component*, 13> controls = { &recordButton, &playButton, &stopButton, &newTrackButton,
-        &importButton, &exportButton, &mixerButton, &viewButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
+        &importButton, &exportButton, &mixerButton, &viewButton, &splitButton, &deleteClipButton, &loopButton, &clickButton, &muteButton, &soloButton, &armButton };
     for (auto* c : controls) addAndMakeVisible(c);
 
     auto setupSlider = [](juce::Slider& s, double min, double max, double value, juce::Slider::SliderStyle style)
@@ -74,6 +78,9 @@ MainComponent::MainComponent()
     setupSlider(tempoSlider, 40, 240, 120, juce::Slider::LinearHorizontal);
     setupSlider(gainSlider, 0, 1.5, 0.85, juce::Slider::LinearHorizontal);
     setupSlider(panSlider, -1, 1, 0, juce::Slider::LinearHorizontal);
+    setupSlider(masterGainSlider, 0, 1.5, 1.0, juce::Slider::LinearHorizontal);
+    masterGainSlider.onValueChange = [this] { masterGain.store(static_cast<float>(masterGainSlider.getValue())); };
+    addAndMakeVisible(masterGainSlider);
     tempoSlider.setNumDecimalPlacesToDisplay(0);
     tempoSlider.onValueChange = [this] { tempo = static_cast<int>(tempoSlider.getValue()); repaint(); };
     gainSlider.onValueChange = [this] { if (auto* t = trackSlots[static_cast<size_t>(selectedTrack.load())].load()) t->gain.store(static_cast<float>(gainSlider.getValue())); };
@@ -94,8 +101,9 @@ MainComponent::MainComponent()
     tempoLabel.setText("TEMPO", juce::dontSendNotification);
     gainLabel.setText("LEVEL", juce::dontSendNotification);
     panLabel.setText("PAN", juce::dontSendNotification);
-    for (auto* l : { &projectLabel, &statusLabel, &timeLabel, &tempoLabel, &gainLabel, &panLabel }) addAndMakeVisible(l);
-    for (auto* l : { &tempoLabel, &gainLabel, &panLabel }) l->setColour(juce::Label::textColourId, mutedText);
+    masterLabel.setText("MASTER", juce::dontSendNotification);
+    for (auto* l : { &projectLabel, &statusLabel, &timeLabel, &tempoLabel, &gainLabel, &panLabel, &masterLabel }) addAndMakeVisible(l);
+    for (auto* l : { &tempoLabel, &gainLabel, &panLabel, &masterLabel }) l->setColour(juce::Label::textColourId, mutedText);
     updateTrackControls();
     startTimerHz(20);
 }
@@ -168,12 +176,14 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                 {
                     for (const auto& clip : t->clips)
                     {
-                        const int sourcePos = pos - clip.start;
-                        if (sourcePos < 0 || sourcePos >= clip.length) continue;
-                        const int n = juce::jmin(amount, clip.length - sourcePos);
-                        const int source = clip.sourceStart + sourcePos;
-                        if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample, t->audio, 0, source, n, left);
-                        if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample, t->audio, 1, source, n, right);
+                        const int overlapStart = juce::jmax(pos, clip.start);
+                        const int overlapEnd = juce::jmin(pos + amount, clip.start + clip.length);
+                        const int n = overlapEnd - overlapStart;
+                        if (n <= 0) continue;
+                        const int outputOffset = overlapStart - pos;
+                        const int source = clip.sourceStart + overlapStart - clip.start;
+                        if (outputs > 0 && out->getNumChannels() > 0) out->addFrom(0, info.startSample + outputOffset, t->audio, 0, source, n, left);
+                        if (outputs > 1 && out->getNumChannels() > 1) out->addFrom(1, info.startSample + outputOffset, t->audio, 1, source, n, right);
                     }
                 }
                 else
@@ -210,6 +220,25 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             --clickCountdown;
         }
     }
+    const float master = masterGain.load();
+    float leftPeak = 0.0f, rightPeak = 0.0f;
+    for (int i = 0; i < info.numSamples; ++i)
+    {
+        if (out->getNumChannels() > 0)
+        {
+            const float v = out->getSample(0, info.startSample + i) * master;
+            out->setSample(0, info.startSample + i, v);
+            leftPeak = juce::jmax(leftPeak, std::abs(v));
+        }
+        if (out->getNumChannels() > 1)
+        {
+            const float v = out->getSample(1, info.startSample + i) * master;
+            out->setSample(1, info.startSample + i, v);
+            rightPeak = juce::jmax(rightPeak, std::abs(v));
+        }
+    }
+    peakLeft.store(leftPeak);
+    peakRight.store(rightPeak);
 }
 
 void MainComponent::releaseResources() {}
@@ -323,7 +352,7 @@ void MainComponent::startPlayback()
 {
     if (getSessionLength() <= 0) { statusLabel.setText("NO AUDIO  •  IMPORT OR RECORD A CLIP FIRST", juce::dontSendNotification); return; }
     if (playhead.load() >= getSessionLength()) playhead.store(0);
-    recording.store(false);
+    stopTransport();
     playing.store(true);
     clickCountdown = 0;
     statusLabel.setText("PLAYING  •  SESSION MIX", juce::dontSendNotification);
@@ -414,8 +443,6 @@ void MainComponent::drawWaveform(juce::Graphics& g, juce::Rectangle<int> area, c
     g.fillRoundedRectangle(area.toFloat(), 5.0f);
     const int count = juce::jmin(sourceLength, t.audio.getNumSamples() - sourceStart);
     if (count <= 0 || t.audio.getNumSamples() <= 0) return;
-    const juce::ScopedTryLock lock(const_cast<juce::CriticalSection&>(audioDataLock));
-    if (!lock.isLocked()) return;
     const int columns = juce::jmax(1, area.getWidth() - 8);
     const int step = juce::jmax(1, count / columns);
     const float mid = area.getCentreY(), amp = area.getHeight() * 0.42f;
@@ -454,6 +481,8 @@ void MainComponent::drawTrack(juce::Graphics& g, juce::Rectangle<int> area, int 
     g.setFont(juce::Font(juce::FontOptions(9.5f)));
     const juce::String flags = juce::String(t->muted.load() ? "M " : "") + (t->solo.load() ? "S " : "") + (t->armed.load() ? "● REC ARM" : "STEREO AUDIO");
     g.drawText(flags, header.removeFromTop(18), juce::Justification::centredLeft);
+    const juce::ScopedTryLock clipReadLock(const_cast<juce::CriticalSection&>(audioDataLock));
+    if (!clipReadLock.isLocked()) return;
     auto emptyClip = area.reduced(6, 10);
     const float pixelsPerSecond = static_cast<float>(tempo.load()) * 0.175f;
     if (!t->clips.empty())
@@ -662,6 +691,20 @@ void MainComponent::paint(juce::Graphics& g)
         g.setColour(mutedText);
         g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
         g.drawText("MIXER  /  CHANNEL STRIPS", 18, y + 8, 240, 16, juce::Justification::centredLeft);
+        const int masterX = getWidth() - 140;
+        g.setColour(panel);
+        g.fillRoundedRectangle(static_cast<float>(masterX), static_cast<float>(y + 31), 122.0f, 148.0f, 6.0f);
+        g.setColour(accent2);
+        g.fillRect(masterX, y + 31, 122, 3);
+        g.setColour(white);
+        g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+        g.drawText("MASTER OUT", masterX + 5, y + 41, 112, 16, juce::Justification::centred);
+        g.setColour(border);
+        g.fillRoundedRectangle(static_cast<float>(masterX + 12), static_cast<float>(y + 66), 12.0f, 70.0f, 3.0f);
+        g.fillRoundedRectangle(static_cast<float>(masterX + 34), static_cast<float>(y + 66), 12.0f, 70.0f, 3.0f);
+        g.setColour(green);
+        g.fillRoundedRectangle(static_cast<float>(masterX + 14), static_cast<float>(y + 136 - juce::jlimit(0.0f, 1.0f, peakLeft.load()) * 68.0f), 8.0f, juce::jlimit(0.0f, 1.0f, peakLeft.load()) * 68.0f, 2.0f);
+        g.fillRoundedRectangle(static_cast<float>(masterX + 36), static_cast<float>(y + 136 - juce::jlimit(0.0f, 1.0f, peakRight.load()) * 68.0f), 8.0f, juce::jlimit(0.0f, 1.0f, peakRight.load()) * 68.0f, 2.0f);
         const int count = juce::jmin(trackCount.load(), 9);
         for (int i = 0; i < count; ++i)
         {
@@ -762,6 +805,43 @@ void MainComponent::mouseUp(const juce::MouseEvent&)
     draggingClip = -1;
 }
 
+void MainComponent::splitSelectedClip()
+{
+    const int trackIndex = selectedTrack.load();
+    if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
+    const juce::ScopedLock lock(audioDataLock);
+    auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
+    if (t == nullptr || selectedClip >= static_cast<int>(t->clips.size())) return;
+    auto clip = t->clips[static_cast<size_t>(selectedClip)];
+    const int splitAt = playhead.load();
+    const int offset = splitAt - clip.start;
+    if (offset <= 0 || offset >= clip.length)
+    {
+        statusLabel.setText("PLACE PLAYHEAD INSIDE SELECTED CLIP TO SPLIT", juce::dontSendNotification);
+        return;
+    }
+    auto& first = t->clips[static_cast<size_t>(selectedClip)];
+    first.length = offset;
+    Track::Clip second{ clip.sourceStart + offset, clip.length - offset, splitAt };
+    t->clips.insert(t->clips.begin() + selectedClip + 1, second);
+    selectedClip += 1;
+    statusLabel.setText("CLIP SPLIT AT PLAYHEAD", juce::dontSendNotification);
+    repaint();
+}
+
+void MainComponent::deleteSelectedClip()
+{
+    const int trackIndex = selectedTrack.load();
+    if (trackIndex < 0 || trackIndex >= trackCount.load() || selectedClip < 0) return;
+    const juce::ScopedLock lock(audioDataLock);
+    auto* t = trackSlots[static_cast<size_t>(trackIndex)].load();
+    if (t == nullptr || selectedClip >= static_cast<int>(t->clips.size())) return;
+    t->clips.erase(t->clips.begin() + selectedClip);
+    selectedClip = -1;
+    statusLabel.setText("CLIP DELETED", juce::dontSendNotification);
+    repaint();
+}
+
 void MainComponent::timerCallback()
 {
     const double seconds = static_cast<double>(playing.load() ? playhead.load() : getSessionLength()) / sampleRate;
@@ -786,7 +866,7 @@ void MainComponent::resized()
     importButton.setBounds(118, 74, 116, 38);
     exportButton.setBounds(246, 74, 108, 38);
     mixerButton.setBounds(366, 74, 80, 38);
-    viewButton.setBounds(454, 74, 118, 38);
+    viewButton.setBounds(454, 74, 118, 38);\n    splitButton.setBounds(580, 74, 68, 38);\n    deleteClipButton.setBounds(656, 74, 100, 38);
     const int inspector = getWidth() - 204;
     muteButton.setBounds(inspector + 14, 218, 48, 28);
     soloButton.setBounds(inspector + 68, 218, 48, 28);
@@ -794,5 +874,5 @@ void MainComponent::resized()
     gainLabel.setBounds(inspector + 14, 266, 70, 18);
     gainSlider.setBounds(inspector + 14, 286, 180, 28);
     panLabel.setBounds(inspector + 14, 322, 70, 18);
-    panSlider.setBounds(inspector + 14, 342, 180, 28);
+    panSlider.setBounds(inspector + 14, 342, 180, 28);\n    masterLabel.setBounds(getWidth() - 144, getHeight() - 155, 100, 16);\n    masterGainSlider.setBounds(getWidth() - 144, getHeight() - 135, 126, 26);
 }
